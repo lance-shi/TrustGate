@@ -76,7 +76,3 @@ Python 3.11 or later is required. Once implementation begins:
 python -m pip install -e ".[dev]"
 pytest
 ```
-
-## License
-
-Apache-2.0. See [LICENSE](LICENSE) once added.
