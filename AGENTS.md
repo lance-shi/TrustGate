@@ -2,7 +2,7 @@
 
 ## Purpose
 
-TrustGate is a Python security boundary that lets LLM-powered applications work with sensitive data without disclosing raw values to an LLM. Keep the core protocol- and framework-independent.
+TrustGate is a Python sensitive-data boundary that lets LLM-powered applications work with sensitive data without disclosing raw values to an LLM. It governs data exposure, not action authorization. Keep the core protocol- and framework-independent.
 
 ## Project conventions
 
@@ -17,7 +17,7 @@ TrustGate is a Python security boundary that lets LLM-powered applications work 
 These are release-blocking requirements:
 
 1. Never return raw sensitive values to an LLM after sanitization.
-2. Rehydrate a tool argument only after an explicit `ALLOW` policy decision.
+2. Rehydrate a tool argument only after an explicit `ALLOW` data-release decision for its destination.
 3. Missing or malformed policy is deny by default.
 4. Token mappings are scoped to a session and cannot resolve across sessions.
 5. Sanitize every tool result before it becomes LLM-visible.
@@ -26,7 +26,10 @@ These are release-blocking requirements:
 
 ## Implementation guardrails
 
-- v0.1 supports registered read-only tools only.
+- Read and write-style tool calls use the same rehydration pipeline. Do not add validation that rejects a call merely because it is a write.
+- TrustGate determines whether data may be released to a destination; it never determines whether a user or agent may execute that action.
+- Make session lifecycle explicit through `TrustSession`; raw mappings stay process-local, in-memory, session-scoped, and ephemeral.
+- Never persist raw token mappings to a database, cache, filesystem, audit store, log, or remote service.
 - Treat unknown, malformed, and cross-session tokens in tool arguments as errors; do not pass them through.
 - Do not silently broaden policy permissions.
 - Do not mutate caller-owned tool result structures while sanitizing them.
@@ -45,4 +48,4 @@ Security-sensitive changes must include tests for both the desired behavior and 
 
 ## Scope discipline
 
-Do not add persistent storage, encryption/key management, write tools, approval flows, OAuth/IAM, web UI, cloud deployment, distributed sessions, or agent framework coupling to v0.1 unless explicitly requested.
+Do not add persistent storage, encryption/key management, authentication, IAM/RBAC/ABAC, user/tool/business authorization, approval flows, transaction handling, retry/idempotency logic, web UI, cloud deployment, distributed sessions, or agent framework coupling to v0.1 unless explicitly requested.
