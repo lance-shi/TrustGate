@@ -26,3 +26,5 @@ dist/
 .vscode/
 .DS_Store
 Thumbs.db
+# Local cross-session implementation notes.
+implementation.md

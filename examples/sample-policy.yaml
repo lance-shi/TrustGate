@@ -1,0 +1,25 @@
+# TrustGate v0.1 data-release policy.
+#
+# Rules not stated here are denied. The policy never permits raw sensitive data
+# to be sent to an LLM: detected values are always tokenized before that boundary.
+version: 1
+
+data_policies:
+  ACCOUNT_NUMBER:
+    external_llm: tokenize
+    destinations:
+      get_account: allow
+      update_account: allow
+      send_email: deny
+
+  PERSON:
+    external_llm: tokenize
+    destinations:
+      get_account: allow
+      update_account: allow
+      send_email: deny
+
+  EMAIL_ADDRESS:
+    external_llm: tokenize
+    destinations:
+      send_email: allow
