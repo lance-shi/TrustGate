@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Annotated, Self
+from typing import Annotated, Any, Mapping, Self
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from typing_extensions import TypeAliasType
@@ -46,6 +46,45 @@ class SafePublicModel(BaseModel):
         except ValidationError:
             pass
         raise ModelValidationError
+
+    @classmethod
+    def model_validate_json(cls, *args: object, **kwargs: object) -> Self:
+        try:
+            return super().model_validate_json(*args, **kwargs)
+        except ValidationError:
+            pass
+        raise ModelValidationError
+
+    @classmethod
+    def model_validate_strings(cls, *args: object, **kwargs: object) -> Self:
+        try:
+            return super().model_validate_strings(*args, **kwargs)
+        except ValidationError:
+            pass
+        raise ModelValidationError
+
+    @classmethod
+    def model_construct(
+        cls,
+        _fields_set: set[str] | None = None,
+        **values: object,
+    ) -> Self:
+        """Validate even callers attempting Pydantic's trusted construction path."""
+        del _fields_set
+        return cls.model_validate(values)
+
+    def model_copy(
+        self,
+        *,
+        update: Mapping[str, Any] | None = None,
+        deep: bool = False,
+    ) -> Self:
+        """Validate updates instead of accepting Pydantic's trusted copy path."""
+        del deep
+        values = self.model_dump()
+        if update is not None:
+            values.update(update)
+        return type(self).model_validate(values)
 
 
 class DataReleaseDecision(StrEnum):

@@ -66,3 +66,49 @@ def test_model_validation_error_hides_raw_input_in_all_public_views() -> None:
 
     assert raw_value not in str(error.value)
     assert raw_value not in repr(error.value)
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        lambda raw_value: SensitiveToken.model_validate_json(
+            f'{{"value": "{raw_value}", "entity_type": "ACCOUNT_NUMBER"}}'
+        ),
+        lambda raw_value: SensitiveToken.model_validate_strings(
+            {"value": raw_value, "entity_type": "ACCOUNT_NUMBER"}
+        ),
+    ],
+)
+def test_alternate_pydantic_validation_paths_hide_raw_input(operation: object) -> None:
+    raw_value = "RAW_SECRET_DO_NOT_LEAK_12345678"
+
+    with pytest.raises(ModelValidationError) as error:
+        operation(raw_value)  # type: ignore[operator]
+
+    assert raw_value not in str(error.value)
+    assert raw_value not in repr(error.value)
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        lambda raw_value: SensitiveToken.model_construct(
+            value=raw_value,
+            entity_type="ACCOUNT_NUMBER",
+        ),
+        lambda raw_value: SensitiveToken(
+            value="[ACCOUNT_NUMBER_1]",
+            entity_type="ACCOUNT_NUMBER",
+        ).model_copy(update={"value": raw_value}),
+    ],
+)
+def test_pydantic_trusted_construction_paths_still_validate_sensitive_tokens(
+    operation: object,
+) -> None:
+    raw_value = "RAW_SECRET_DO_NOT_LEAK_12345678"
+
+    with pytest.raises(ModelValidationError) as error:
+        operation(raw_value)  # type: ignore[operator]
+
+    assert raw_value not in str(error.value)
+    assert raw_value not in repr(error.value)

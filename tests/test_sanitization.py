@@ -2,10 +2,17 @@
 
 from dataclasses import dataclass
 from re import fullmatch
+from threading import Event, Thread
 
 import pytest
 
-from trustgate import DetectionUnavailableError, SensitiveEntity, TrustGate, TrustSession
+from trustgate import (
+    DetectionUnavailableError,
+    SensitiveEntity,
+    TrustGate,
+    TrustSession,
+    UnknownTokenError,
+)
 
 RAW_SENTINEL = "RAW_SECRET_DO_NOT_LEAK_12345678"
 
@@ -21,6 +28,18 @@ class StaticDetector:
 class FailingDetector:
     def detect(self, text: str) -> tuple[SensitiveEntity, ...]:
         raise RuntimeError(f"Detection failed for {text}")
+
+
+class BlockingDetector:
+    def __init__(self, entity: SensitiveEntity, started: Event, release: Event) -> None:
+        self._entity = entity
+        self._started = started
+        self._release = release
+
+    def detect(self, text: str) -> tuple[SensitiveEntity, ...]:
+        self._started.set()
+        assert self._release.wait(timeout=2)
+        return (self._entity,)
 
 
 def entity(entity_type: str, start: int, end: int, score: float = 0.9) -> SensitiveEntity:
@@ -105,3 +124,45 @@ def test_sanitize_hides_sensitive_input_when_detection_fails() -> None:
 
     assert RAW_SENTINEL not in str(error.value)
     assert RAW_SENTINEL not in repr(error.value)
+
+
+def test_sanitize_fails_closed_for_an_out_of_bounds_detector_span() -> None:
+    session = TrustSession(detector=StaticDetector((entity("PERSON", 0, len(RAW_SENTINEL) + 1),)))
+
+    with pytest.raises(DetectionUnavailableError) as error:
+        session.sanitize(RAW_SENTINEL)
+
+    assert RAW_SENTINEL not in str(error.value)
+    assert RAW_SENTINEL not in repr(error.value)
+
+
+def test_close_waits_for_sanitization_then_clears_all_issued_mappings() -> None:
+    raw_value = "12345678"
+    detection_started = Event()
+    allow_detection = Event()
+    close_finished = Event()
+    session = TrustSession(
+        detector=BlockingDetector(
+            entity("ACCOUNT_NUMBER", 0, len(raw_value)),
+            detection_started,
+            allow_detection,
+        )
+    )
+    sanitized_values: list[str] = []
+
+    sanitize_thread = Thread(target=lambda: sanitized_values.append(session.sanitize(raw_value)))
+    close_thread = Thread(target=lambda: (session.close(), close_finished.set()))
+    sanitize_thread.start()
+    assert detection_started.wait(timeout=2)
+    close_thread.start()
+    assert not close_finished.wait(timeout=0.05)
+
+    allow_detection.set()
+    sanitize_thread.join(timeout=2)
+    close_thread.join(timeout=2)
+
+    assert not sanitize_thread.is_alive()
+    assert not close_thread.is_alive()
+    assert session.is_closed
+    with pytest.raises(UnknownTokenError):
+        session._vault.resolve(sanitized_values[0])

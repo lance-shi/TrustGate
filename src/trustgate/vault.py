@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from re import Pattern, compile
-from threading import Lock
+from threading import Lock, RLock
 from uuid import uuid4
 
 from .exceptions import CrossSessionTokenError, MalformedTokenError, UnknownTokenError
@@ -67,37 +67,41 @@ class TokenVault:
         self._registry = registry or TokenRegistry()
         self._entries_by_token: dict[str, VaultEntry] = {}
         self._tokens_by_value: dict[tuple[str, str], SensitiveToken] = {}
+        self._lock = RLock()
 
     def store(self, *, value: str, entity_type: str) -> SensitiveToken:
         """Store a raw value and return its stable token for this vault."""
-        mapping_key = (entity_type, value)
-        existing_token = self._tokens_by_value.get(mapping_key)
-        if existing_token is not None:
-            return existing_token
+        with self._lock:
+            mapping_key = (entity_type, value)
+            existing_token = self._tokens_by_value.get(mapping_key)
+            if existing_token is not None:
+                return existing_token
 
-        token = SensitiveToken(
-            value=self._registry.issue(entity_type=entity_type, session_id=self._session_id),
-            entity_type=entity_type,
-        )
-        self._entries_by_token[token.value] = VaultEntry(value=value, entity_type=entity_type)
-        self._tokens_by_value[mapping_key] = token
-        return token
+            token = SensitiveToken(
+                value=self._registry.issue(entity_type=entity_type, session_id=self._session_id),
+                entity_type=entity_type,
+            )
+            self._entries_by_token[token.value] = VaultEntry(value=value, entity_type=entity_type)
+            self._tokens_by_value[mapping_key] = token
+            return token
 
     def resolve(self, token: str) -> VaultEntry:
         """Return an internal mapping or fail closed for an unknown token."""
-        if not TOKEN_PATTERN.fullmatch(token):
-            raise MalformedTokenError
+        with self._lock:
+            if not TOKEN_PATTERN.fullmatch(token):
+                raise MalformedTokenError
 
-        entry = self._entries_by_token.get(token)
-        if entry is not None:
-            return entry
-        owner_session_id = self._registry.owner_for(token)
-        if owner_session_id is not None and owner_session_id != self._session_id:
-            raise CrossSessionTokenError
-        raise UnknownTokenError
+            entry = self._entries_by_token.get(token)
+            if entry is not None:
+                return entry
+            owner_session_id = self._registry.owner_for(token)
+            if owner_session_id is not None and owner_session_id != self._session_id:
+                raise CrossSessionTokenError
+            raise UnknownTokenError
 
     def clear(self) -> None:
         """Irreversibly discard all mappings held by this process-local vault."""
-        self._registry.revoke(tuple(self._entries_by_token))
-        self._entries_by_token.clear()
-        self._tokens_by_value.clear()
+        with self._lock:
+            self._registry.revoke(tuple(self._entries_by_token))
+            self._entries_by_token.clear()
+            self._tokens_by_value.clear()

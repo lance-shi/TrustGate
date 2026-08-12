@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from threading import RLock
 from types import TracebackType
 from typing import Protocol
 from uuid import uuid4
@@ -32,6 +33,7 @@ class TrustSession:
     def __init__(self, *, detector: EntityDetector | None = None) -> None:
         self._session_id = uuid4().hex
         self._closed = False
+        self._lock = RLock()
         self._vault = TokenVault(session_id=self._session_id, registry=_PROCESS_TOKEN_REGISTRY)
         self._detector = detector
 
@@ -43,11 +45,13 @@ class TrustSession:
     @property
     def is_closed(self) -> bool:
         """Return whether the session has been closed."""
-        return self._closed
+        with self._lock:
+            return self._closed
 
     def __enter__(self) -> TrustSession:
-        self._ensure_open()
-        return self
+        with self._lock:
+            self._ensure_open()
+            return self
 
     def __exit__(
         self,
@@ -59,36 +63,42 @@ class TrustSession:
 
     def close(self) -> None:
         """Close the session and discard every private raw token mapping."""
-        if self._closed:
-            return
-        self._vault.clear()
-        self._closed = True
+        with self._lock:
+            if self._closed:
+                return
+            self._vault.clear()
+            self._closed = True
 
     def sanitize(self, text: str) -> str:
         """Replace detected sensitive spans with stable session-local tokens."""
-        self._ensure_open()
-        entities = self._detect(text)
-        sanitized = text
-        for entity in reversed(_merge_overlapping_entities(entities)):
-            raw_value = text[entity.start : entity.end]
-            token = self._vault.store(value=raw_value, entity_type=entity.entity_type)
-            sanitized = f"{sanitized[:entity.start]}{token.value}{sanitized[entity.end:]}"
-        return sanitized
+        with self._lock:
+            self._ensure_open()
+            entities = self._detect(text)
+            _validate_entity_ranges(entities, text_length=len(text))
+            sanitized = text
+            for entity in reversed(_merge_overlapping_entities(entities)):
+                raw_value = text[entity.start : entity.end]
+                token = self._vault.store(value=raw_value, entity_type=entity.entity_type)
+                sanitized = f"{sanitized[:entity.start]}{token.value}{sanitized[entity.end:]}"
+            return sanitized
 
     def rehydrate_for_tool(self, tool_call: ToolCall) -> dict[str, JsonValue]:
         """Release approved token values to a tool; default denial is already active."""
-        self._ensure_open()
-        raise DataReleaseDenied
+        with self._lock:
+            self._ensure_open()
+            raise DataReleaseDenied
 
     def sanitize_tool_result(self, result: JsonValue) -> JsonValue:
         """Return an LLM-safe copy of a tool result once sanitization is implemented."""
-        self._ensure_open()
-        raise FeatureUnavailableError
+        with self._lock:
+            self._ensure_open()
+            raise FeatureUnavailableError
 
     def rehydrate_for_user(self, text: str) -> str:
         """Restore a tokenized response for its user after vault support is implemented."""
-        self._ensure_open()
-        raise FeatureUnavailableError
+        with self._lock:
+            self._ensure_open()
+            raise FeatureUnavailableError
 
     def _ensure_open(self) -> None:
         if self._closed:
@@ -129,6 +139,12 @@ def _merge_overlapping_entities(
         cluster_end = entity.end
     merged.append(_merge_cluster(cluster))
     return tuple(merged)
+
+
+def _validate_entity_ranges(entities: tuple[SensitiveEntity, ...], *, text_length: int) -> None:
+    """Fail closed when a detector returns a span outside its input text."""
+    if any(entity.end > text_length for entity in entities):
+        raise DetectionUnavailableError
 
 
 def _merge_cluster(cluster: list[SensitiveEntity]) -> SensitiveEntity:
