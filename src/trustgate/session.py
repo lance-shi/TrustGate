@@ -1,8 +1,4 @@
-"""The Day 1 public session scaffold.
-
-Sensitive transformations are implemented in later milestones. Until then,
-operations that could disclose a value fail safely rather than returning input.
-"""
+"""Explicit session lifecycle and private token-vault ownership."""
 
 from __future__ import annotations
 
@@ -11,14 +7,18 @@ from uuid import uuid4
 
 from .exceptions import DataReleaseDenied, FeatureUnavailableError, SessionClosedError
 from .models import JsonValue, ToolCall
+from .vault import TokenRegistry, TokenVault
+
+_PROCESS_TOKEN_REGISTRY = TokenRegistry()
 
 
 class TrustSession:
-    """An explicit TrustGate session with a future session-local token vault."""
+    """An explicit TrustGate session with a private session-local token vault."""
 
     def __init__(self) -> None:
         self._session_id = uuid4().hex
         self._closed = False
+        self._vault = TokenVault(session_id=self._session_id, registry=_PROCESS_TOKEN_REGISTRY)
 
     @property
     def session_id(self) -> str:
@@ -43,7 +43,10 @@ class TrustSession:
         self.close()
 
     def close(self) -> None:
-        """Close the session. Vault cleanup is added with the vault implementation."""
+        """Close the session and discard every private raw token mapping."""
+        if self._closed:
+            return
+        self._vault.clear()
         self._closed = True
 
     def sanitize(self, text: str) -> str:

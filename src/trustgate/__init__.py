@@ -3,6 +3,7 @@
 from .exceptions import (
     CrossSessionTokenError,
     DataReleaseDenied,
+    DetectionUnavailableError,
     FeatureUnavailableError,
     MalformedTokenError,
     ModelValidationError,
@@ -32,6 +33,7 @@ __all__ = [
     "CrossSessionTokenError",
     "DataReleaseDecision",
     "DataReleaseDenied",
+    "DetectionUnavailableError",
     "DataReleaseRequest",
     "DataReleaseResult",
     "FeatureUnavailableError",

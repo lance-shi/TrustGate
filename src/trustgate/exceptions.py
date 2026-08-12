@@ -16,6 +16,12 @@ class FeatureUnavailableError(TrustGateError):
     default_message = "This TrustGate capability is not available yet."
 
 
+class DetectionUnavailableError(TrustGateError):
+    """Raised when the configured local sensitive-data detector cannot load."""
+
+    default_message = "The local sensitive-data detector is unavailable."
+
+
 class PolicyError(TrustGateError):
     """Base exception for invalid or unavailable data-release policy."""
 
