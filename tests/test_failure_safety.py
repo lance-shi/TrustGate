@@ -25,13 +25,13 @@ def assert_does_not_disclose_raw_value(value: object) -> None:
     assert RAW_SENTINEL not in str(value)
 
 
-def test_unimplemented_sanitization_does_not_return_raw_input() -> None:
+def test_sanitization_does_not_return_detected_raw_input() -> None:
     session = TrustGate().session()
+    sensitive_value = "12345678"
 
-    with pytest.raises(FeatureUnavailableError) as error:
-        session.sanitize(RAW_SENTINEL)
+    sanitized = session.sanitize(f"Check account {sensitive_value}.")
 
-    assert_does_not_disclose_raw_value(error.value)
+    assert sensitive_value not in sanitized
 
 
 def test_tool_rehydration_is_denied_by_default_without_disclosing_input() -> None:
@@ -73,9 +73,8 @@ def test_every_tool_call_is_denied_until_policy_rehydration_exists(tool_call: To
 def test_context_manager_closes_the_session_after_a_failed_operation() -> None:
     session = TrustGate().session()
 
-    with pytest.raises(FeatureUnavailableError):
-        with session:
-            session.sanitize(RAW_SENTINEL)
+    with session:
+        assert "12345678" not in session.sanitize("Check account 12345678.")
 
     assert session.is_closed
     with pytest.raises(SessionClosedError) as error:
