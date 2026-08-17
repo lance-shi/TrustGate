@@ -6,7 +6,6 @@ from security_assertions import assert_no_raw_sensitive_values
 from trustgate import (
     CrossSessionTokenError,
     DataReleaseDenied,
-    FeatureUnavailableError,
     MalformedTokenError,
     ModelValidationError,
     PolicyError,
@@ -99,8 +98,8 @@ def test_closed_session_rejects_all_sensitive_boundary_operations() -> None:
         assert_no_raw_sensitive_values(error.value, RAW_SENTINEL)
 
 
-def test_policy_loading_placeholder_is_safe_for_a_sensitive_path() -> None:
-    with pytest.raises(FeatureUnavailableError) as error:
+def test_policy_loading_failure_is_safe_for_a_sensitive_path() -> None:
+    with pytest.raises(PolicyValidationError) as error:
         TrustGate.from_yaml(f"{RAW_SENTINEL}.yaml")
 
     assert_no_raw_sensitive_values(error.value, RAW_SENTINEL)
@@ -110,7 +109,6 @@ def test_policy_loading_placeholder_is_safe_for_a_sensitive_path() -> None:
     "error_type",
     [
         TrustGateError,
-        FeatureUnavailableError,
         ModelValidationError,
         PolicyError,
         PolicyValidationError,
