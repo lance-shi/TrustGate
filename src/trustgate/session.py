@@ -14,7 +14,15 @@ from .exceptions import (
     FeatureUnavailableError,
     SessionClosedError,
 )
-from .models import JsonValue, SensitiveEntity, ToolCall
+from .models import (
+    DataReleaseRequest,
+    DataReleaseResult,
+    JsonValue,
+    SensitiveEntity,
+    ToolCall,
+    TrustPolicy,
+)
+from .policy import decide_data_release
 from .vault import TokenRegistry, TokenVault
 
 _PROCESS_TOKEN_REGISTRY = TokenRegistry()
@@ -30,12 +38,18 @@ class EntityDetector(Protocol):
 class TrustSession:
     """An explicit TrustGate session with a private session-local token vault."""
 
-    def __init__(self, *, detector: EntityDetector | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        detector: EntityDetector | None = None,
+        policy: TrustPolicy | None = None,
+    ) -> None:
         self._session_id = uuid4().hex
         self._closed = False
         self._lock = RLock()
         self._vault = TokenVault(session_id=self._session_id, registry=_PROCESS_TOKEN_REGISTRY)
         self._detector = detector
+        self._policy = policy
 
     @property
     def session_id(self) -> str:
@@ -47,6 +61,12 @@ class TrustSession:
         """Return whether the session has been closed."""
         with self._lock:
             return self._closed
+
+    def decide_data_release(self, request: DataReleaseRequest) -> DataReleaseResult:
+        """Evaluate this session's policy without releasing a token-vault value."""
+        with self._lock:
+            self._ensure_open()
+            return decide_data_release(self._policy, request)
 
     def __enter__(self) -> TrustSession:
         with self._lock:

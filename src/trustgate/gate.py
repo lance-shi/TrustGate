@@ -45,4 +45,4 @@ class TrustGate:
         ``principal`` is accepted for the planned public API but is deliberately
         not retained by the Day 1 scaffold.
         """
-        return TrustSession()
+        return TrustSession(policy=self._policy)

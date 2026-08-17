@@ -28,6 +28,25 @@ def test_policy_model_accepts_the_documented_schema() -> None:
     assert account_policy.destinations["send_email"] is DataReleaseDecision.DENY
 
 
+def test_policy_mapping_cannot_be_mutated_after_validation() -> None:
+    policy = TrustPolicy(
+        version=1,
+        data_policies={
+            "ACCOUNT_NUMBER": {
+                "external_llm": "tokenize",
+                "destinations": {"get_account": "allow"},
+            }
+        },
+    )
+
+    with pytest.raises(TypeError):
+        policy.data_policies["PERSON"] = policy.data_policies["ACCOUNT_NUMBER"]  # type: ignore[index]
+    with pytest.raises(TypeError):
+        policy.data_policies["ACCOUNT_NUMBER"].destinations["send_email"] = (  # type: ignore[index]
+            DataReleaseDecision.ALLOW
+        )
+
+
 @pytest.mark.parametrize(
     "policy",
     [

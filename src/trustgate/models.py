@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import StrEnum
+from types import MappingProxyType
 from typing import Annotated, Any, ClassVar, Literal, Mapping, Self
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_serializer
 from typing_extensions import TypeAliasType
 
 from .exceptions import ModelValidationError, PolicyValidationError
@@ -111,14 +112,32 @@ class DataPolicy(SafePolicyModel):
     """Destination-specific release rules for one sensitive entity type."""
 
     external_llm: ExternalLLMHandling
-    destinations: dict[Destination, DataReleaseDecision]
+    destinations: Mapping[Destination, DataReleaseDecision]
+
+    def model_post_init(self, __context: object) -> None:
+        object.__setattr__(self, "destinations", MappingProxyType(dict(self.destinations)))
+
+    @field_serializer("destinations")
+    def _serialize_destinations(
+        self, destinations: Mapping[str, DataReleaseDecision]
+    ) -> dict[str, DataReleaseDecision]:
+        return dict(destinations)
 
 
 class TrustPolicy(SafePolicyModel):
     """The complete v0.1 default-deny data-release policy document."""
 
     version: Literal[1]
-    data_policies: dict[EntityType, DataPolicy]
+    data_policies: Mapping[EntityType, DataPolicy]
+
+    def model_post_init(self, __context: object) -> None:
+        object.__setattr__(self, "data_policies", MappingProxyType(dict(self.data_policies)))
+
+    @field_serializer("data_policies")
+    def _serialize_data_policies(
+        self, data_policies: Mapping[str, DataPolicy]
+    ) -> dict[str, DataPolicy]:
+        return dict(data_policies)
 
 
 class AuditEventType(StrEnum):
