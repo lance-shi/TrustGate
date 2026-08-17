@@ -2,23 +2,32 @@
 
 from __future__ import annotations
 
+from re import Match, Pattern, compile
 from threading import RLock
 from types import TracebackType
 from typing import Protocol
 from uuid import uuid4
 
+from .audit import AuditSink, InMemoryAuditSink
 from .detection import PresidioDetector
 from .exceptions import (
     DataReleaseDenied,
     DetectionUnavailableError,
     FeatureUnavailableError,
+    MalformedTokenError,
     SessionClosedError,
+    TokenResolutionError,
+    ToolResultSanitizationError,
 )
 from .models import (
+    AuditEvent,
+    AuditEventType,
+    DataReleaseDecision,
     DataReleaseRequest,
     DataReleaseResult,
     JsonValue,
     SensitiveEntity,
+    SensitiveToken,
     ToolCall,
     TrustPolicy,
 )
@@ -26,6 +35,7 @@ from .policy import decide_data_release
 from .vault import TokenRegistry, TokenVault
 
 _PROCESS_TOKEN_REGISTRY = TokenRegistry()
+_BRACKETED_VALUE_PATTERN: Pattern[str] = compile(r"\[[^\[\]]*\]")
 
 
 class EntityDetector(Protocol):
@@ -43,6 +53,7 @@ class TrustSession:
         *,
         detector: EntityDetector | None = None,
         policy: TrustPolicy | None = None,
+        audit_sink: AuditSink | None = None,
     ) -> None:
         self._session_id = uuid4().hex
         self._closed = False
@@ -50,6 +61,8 @@ class TrustSession:
         self._vault = TokenVault(session_id=self._session_id, registry=_PROCESS_TOKEN_REGISTRY)
         self._detector = detector
         self._policy = policy
+        self._audit_sink = audit_sink or InMemoryAuditSink()
+        self._record_audit(AuditEventType.SESSION_OPENED)
 
     @property
     def session_id(self) -> str:
@@ -88,31 +101,60 @@ class TrustSession:
                 return
             self._vault.clear()
             self._closed = True
+            self._record_audit(AuditEventType.SESSION_CLOSED)
 
     def sanitize(self, text: str) -> str:
         """Replace detected sensitive spans with stable session-local tokens."""
         with self._lock:
             self._ensure_open()
-            entities = self._detect(text)
-            _validate_entity_ranges(entities, text_length=len(text))
-            sanitized = text
-            for entity in reversed(_merge_overlapping_entities(entities)):
-                raw_value = text[entity.start : entity.end]
-                token = self._vault.store(value=raw_value, entity_type=entity.entity_type)
-                sanitized = f"{sanitized[:entity.start]}{token.value}{sanitized[entity.end:]}"
+            sanitized, tokens = self._sanitize_text(text)
+            self._record_audit(AuditEventType.VALUE_SANITIZED, tokens=tokens)
             return sanitized
 
     def rehydrate_for_tool(self, tool_call: ToolCall) -> dict[str, JsonValue]:
-        """Release approved token values to a tool; default denial is already active."""
+        """Return a copied tool argument tree with approved tokens rehydrated.
+
+        Token references are validated before any argument tree is returned, so
+        one denied or invalid reference cannot produce a partially rehydrated
+        tool call. Values without token references are non-sensitive to this
+        boundary and are copied unchanged.
+        """
         with self._lock:
             self._ensure_open()
-            raise DataReleaseDenied
+            tokens: list[SensitiveToken] = []
+            try:
+                arguments = {
+                    name: self._rehydrate_value(
+                        value=value,
+                        destination=tool_call.name,
+                        tokens=tokens,
+                    )
+                    for name, value in tool_call.arguments.items()
+                }
+            except (DataReleaseDenied, TokenResolutionError):
+                self._record_audit(
+                    AuditEventType.TOOL_RELEASE_DENIED,
+                    destination=tool_call.name,
+                    decision=DataReleaseDecision.DENY,
+                    tokens=tuple(tokens),
+                )
+                raise
+            self._record_audit(
+                AuditEventType.TOOL_RELEASE_ALLOWED,
+                destination=tool_call.name,
+                decision=DataReleaseDecision.ALLOW,
+                tokens=tuple(tokens),
+            )
+            return arguments
 
     def sanitize_tool_result(self, result: JsonValue) -> JsonValue:
-        """Return an LLM-safe copy of a tool result once sanitization is implemented."""
+        """Recursively return an LLM-safe copy of one tool result."""
         with self._lock:
             self._ensure_open()
-            raise FeatureUnavailableError
+            tokens: list[SensitiveToken] = []
+            sanitized = self._sanitize_result_value(value=result, tokens=tokens)
+            self._record_audit(AuditEventType.TOOL_RESULT_SANITIZED, tokens=tuple(tokens))
+            return sanitized
 
     def rehydrate_for_user(self, text: str) -> str:
         """Restore a tokenized response for its user after vault support is implemented."""
@@ -135,6 +177,119 @@ class TrustSession:
             raise
         except Exception:
             raise DetectionUnavailableError from None
+
+    def _sanitize_text(self, text: str) -> tuple[str, tuple[SensitiveToken, ...]]:
+        entities = self._detect(text)
+        _validate_entity_ranges(entities, text_length=len(text))
+        tokens: list[SensitiveToken] = []
+        sanitized = text
+        for entity in reversed(_merge_overlapping_entities(entities)):
+            raw_value = text[entity.start : entity.end]
+            token = self._vault.store(value=raw_value, entity_type=entity.entity_type)
+            tokens.append(token)
+            sanitized = f"{sanitized[:entity.start]}{token.value}{sanitized[entity.end:]}"
+        return sanitized, tuple(reversed(tokens))
+
+    def _sanitize_result_value(
+        self,
+        *,
+        value: object,
+        tokens: list[SensitiveToken],
+    ) -> JsonValue:
+        if isinstance(value, str):
+            sanitized, detected_tokens = self._sanitize_text(value)
+            tokens.extend(detected_tokens)
+            return sanitized
+        if value is None or isinstance(value, bool | int | float):
+            return value
+        if isinstance(value, list):
+            return [self._sanitize_result_value(value=item, tokens=tokens) for item in value]
+        if isinstance(value, dict):
+            sanitized: dict[str, JsonValue] = {}
+            for key, item in value.items():
+                if not isinstance(key, str):
+                    raise ToolResultSanitizationError
+                sanitized_key, key_tokens = self._sanitize_text(key)
+                tokens.extend(key_tokens)
+                if sanitized_key in sanitized:
+                    raise ToolResultSanitizationError
+                sanitized[sanitized_key] = self._sanitize_result_value(value=item, tokens=tokens)
+            return sanitized
+        raise ToolResultSanitizationError
+
+    def _rehydrate_value(
+        self,
+        *,
+        value: JsonValue,
+        destination: str,
+        tokens: list[SensitiveToken],
+    ) -> JsonValue:
+        if isinstance(value, str):
+            return self._rehydrate_text(text=value, destination=destination, tokens=tokens)
+        if isinstance(value, list):
+            return [
+                self._rehydrate_value(value=item, destination=destination, tokens=tokens)
+                for item in value
+            ]
+        if isinstance(value, dict):
+            return {
+                name: self._rehydrate_value(value=item, destination=destination, tokens=tokens)
+                for name, item in value.items()
+            }
+        return value
+
+    def _rehydrate_text(
+        self,
+        *,
+        text: str,
+        destination: str,
+        tokens: list[SensitiveToken],
+    ) -> str:
+        matches = tuple(_BRACKETED_VALUE_PATTERN.finditer(text))
+        unmatched_brackets = _BRACKETED_VALUE_PATTERN.sub("", text)
+        if not matches:
+            if "[" in text or "]" in text:
+                raise MalformedTokenError
+            return text
+        if "[" in unmatched_brackets or "]" in unmatched_brackets:
+            raise MalformedTokenError
+
+        replacements: list[tuple[Match[str], str]] = []
+        for match in matches:
+            entry = self._vault.resolve(match.group())
+            tokens.append(SensitiveToken(value=match.group(), entity_type=entry.entity_type))
+            result = self.decide_data_release(
+                DataReleaseRequest(entity_type=entry.entity_type, destination=destination)
+            )
+            if result.decision is not DataReleaseDecision.ALLOW:
+                raise DataReleaseDenied
+            replacements.append((match, entry.value))
+
+        rehydrated = text
+        for match, raw_value in reversed(replacements):
+            rehydrated = f"{rehydrated[:match.start()]}{raw_value}{rehydrated[match.end():]}"
+        return rehydrated
+
+    def _record_audit(
+        self,
+        event_type: AuditEventType,
+        *,
+        destination: str | None = None,
+        decision: DataReleaseDecision | None = None,
+        tokens: tuple[SensitiveToken, ...] = (),
+    ) -> None:
+        unique_tokens = tuple(dict.fromkeys(token.value for token in tokens))
+        entity_types = tuple(dict.fromkeys(token.entity_type for token in tokens))
+        self._audit_sink.record(
+            AuditEvent(
+                event_type=event_type,
+                session_id=self._session_id,
+                entity_types=entity_types,
+                destination=destination,
+                decision=decision,
+                tokens=unique_tokens,
+            )
+        )
 
 
 def _merge_overlapping_entities(

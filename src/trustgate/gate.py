@@ -6,6 +6,7 @@ from pathlib import Path
 
 import yaml
 
+from .audit import AuditSink, InMemoryAuditSink
 from .exceptions import PolicyValidationError
 from .models import TrustPolicy
 from .session import TrustSession
@@ -14,13 +15,24 @@ from .session import TrustSession
 class TrustGate:
     """Create explicit sessions around an application's LLM and tool boundaries."""
 
-    def __init__(self, *, policy: TrustPolicy | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        policy: TrustPolicy | None = None,
+        audit_sink: AuditSink | None = None,
+    ) -> None:
         self._policy = policy
+        self._audit_sink = audit_sink or InMemoryAuditSink()
 
     @property
     def policy(self) -> TrustPolicy | None:
         """Return the validated release policy, if this gate was configured with one."""
         return self._policy
+
+    @property
+    def audit_sink(self) -> AuditSink:
+        """Return the safe audit sink shared by this gate's sessions."""
+        return self._audit_sink
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> TrustGate:
@@ -45,4 +57,4 @@ class TrustGate:
         ``principal`` is accepted for the planned public API but is deliberately
         not retained by the Day 1 scaffold.
         """
-        return TrustSession(policy=self._policy)
+        return TrustSession(policy=self._policy, audit_sink=self._audit_sink)

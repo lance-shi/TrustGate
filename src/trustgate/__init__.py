@@ -1,5 +1,6 @@
 """TrustGate: a policy-controlled privacy boundary for LLM applications."""
 
+from .audit import AuditSink, InMemoryAuditSink
 from .exceptions import (
     CrossSessionTokenError,
     DataReleaseDenied,
@@ -11,6 +12,7 @@ from .exceptions import (
     PolicyValidationError,
     SessionClosedError,
     TokenResolutionError,
+    ToolResultSanitizationError,
     TrustGateError,
     UnknownTokenError,
 )
@@ -34,6 +36,7 @@ from .session import TrustSession
 __all__ = [
     "AuditEvent",
     "AuditEventType",
+    "AuditSink",
     "CrossSessionTokenError",
     "DataPolicy",
     "DataReleaseDecision",
@@ -44,6 +47,7 @@ __all__ = [
     "DataReleaseResult",
     "decide_data_release",
     "FeatureUnavailableError",
+    "InMemoryAuditSink",
     "MalformedTokenError",
     "ModelValidationError",
     "PolicyError",
@@ -52,6 +56,7 @@ __all__ = [
     "SensitiveToken",
     "SessionClosedError",
     "TokenResolutionError",
+    "ToolResultSanitizationError",
     "ToolCall",
     "TrustGate",
     "TrustGateError",

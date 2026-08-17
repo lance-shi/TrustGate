@@ -35,7 +35,8 @@ def test_sanitization_does_not_return_detected_raw_input() -> None:
 
 def test_tool_rehydration_is_denied_by_default_without_disclosing_input() -> None:
     session = TrustGate().session()
-    call = ToolCall(name="get_account", arguments={"account": RAW_SENTINEL})
+    token = session._vault.store(value=RAW_SENTINEL, entity_type="ACCOUNT_NUMBER")
+    call = ToolCall(name="get_account", arguments={"account": token.value})
 
     with pytest.raises(DataReleaseDenied) as error:
         session.rehydrate_for_tool(call)
@@ -53,15 +54,10 @@ def test_closed_session_fails_without_disclosing_input() -> None:
     assert_does_not_disclose_raw_value(error.value)
 
 
-@pytest.mark.parametrize(
-    "tool_call",
-    [
-        ToolCall(name="get_account", arguments={}),
-        ToolCall(name="get_account", arguments={"account": "[ACCOUNT_NUMBER_1]"}),
-    ],
-)
-def test_every_tool_call_is_denied_until_policy_rehydration_exists(tool_call: ToolCall) -> None:
+def test_token_release_is_denied_without_a_policy() -> None:
     session = TrustGate().session()
+    token = session._vault.store(value=RAW_SENTINEL, entity_type="ACCOUNT_NUMBER")
+    tool_call = ToolCall(name="get_account", arguments={"account": token.value})
 
     with pytest.raises(DataReleaseDenied) as error:
         session.rehydrate_for_tool(tool_call)

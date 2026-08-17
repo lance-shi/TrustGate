@@ -46,6 +46,12 @@ class DataReleaseDenied(TrustGateError):
     default_message = "Sensitive data release is denied."
 
 
+class ToolResultSanitizationError(TrustGateError):
+    """Raised when a tool result cannot be safely made LLM-visible."""
+
+    default_message = "The tool result cannot be safely sanitized."
+
+
 class TokenResolutionError(TrustGateError):
     """Base exception for invalid token resolution attempts."""
 
