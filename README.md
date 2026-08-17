@@ -8,29 +8,53 @@ data exposure, not action authorization.
 
 ## Status
 
-TrustGate is pre-alpha. The current Day 2 implementation provides local English
-sensitive-text detection, deterministic session-scoped tokenization, an
-in-memory vault, session cleanup, and cross-session token isolation.
+TrustGate is pre-alpha. The current Day 3 implementation provides:
 
-YAML policy loading, tool argument rehydration, recursive tool-result
-sanitization, and auditing are planned but **not implemented**. Do not use this
-version as a complete tool-data boundary or release it as the complete v0.1
-workflow.
+- Local English sensitive-text detection and deterministic, session-scoped
+  tokenization.
+- YAML policy loading with strict validation and default-deny decisions.
+- Policy-controlled recursive tool-argument rehydration.
+- Recursive tool-result sanitization before values become LLM-visible.
+- Process-local, in-memory audit events containing only safe metadata.
+- Session cleanup and cross-session token isolation.
 
-## Current usage: sanitize text before an LLM boundary
+`rehydrate_for_user()` is intentionally not implemented. TrustGate also remains
+framework-independent and has no persistent audit or vault storage.
+
+## Usage: LLM and tool boundaries
 
 ```python
-from trustgate import TrustGate
+from trustgate import ToolCall, TrustGate
 
-with TrustGate().session() as session:
+gate = TrustGate.from_yaml("examples/sample-policy.yaml")
+
+with gate.session() as session:
     safe_input = session.sanitize("Check account 12345678 for Jane Smith.")
     # Send only safe_input to the LLM.
+
+    # The LLM returns tokenized arguments it has seen, never raw values.
+    tool_call = ToolCall(
+        name="get_account",
+        arguments={"account": "[ACCOUNT_NUMBER_1]"},
+    )
+    tool_arguments = session.rehydrate_for_tool(tool_call)
+    # Send tool_arguments only to the trusted tool runtime, never to the LLM.
+
+    tool_result = {"account": tool_arguments["account"], "owner": "Jane Smith"}
+    safe_tool_result = session.sanitize_tool_result(tool_result)
+    # Send only safe_tool_result to the LLM.
 ```
 
 The LLM-visible result contains tokens such as `[ACCOUNT_NUMBER_1]` and
 `[PERSON_1]`, rather than the detected raw values. Token mappings are
 process-local, in-memory, scoped to one `TrustSession`, and discarded when that
 session closes. A token from another active session fails closed.
+
+`rehydrate_for_tool()` traverses nested JSON-like arguments without mutating the
+`ToolCall`. Every token must belong to the current session and have an explicit
+`allow` decision for the tool destination. Unknown, malformed, cross-session,
+or denied tokens fail closed. Read and write-style destinations use the same
+data-release decision path.
 
 ## Language support and local model setup
 
@@ -47,19 +71,47 @@ Some pattern-based entities, such as account numbers and email addresses, may
 be detectable in other languages. This does not constitute multi-language
 support.
 
-## Planned v0.1 workflow
+## Data-release policy
 
-The following is design intent, not a currently runnable API:
+Policies are loaded using `TrustGate.from_yaml()`. The schema is strict: the
+only supported version is `1`, LLM exposure must be `tokenize`, and release
+decisions are `allow` or `deny`.
+
+```yaml
+version: 1
+data_policies:
+  ACCOUNT_NUMBER:
+    external_llm: tokenize
+    destinations:
+      get_account: allow
+      update_account: allow
+      send_email: deny
+```
+
+Missing, unreadable, malformed, or structurally invalid policy documents fail
+closed. Missing entity types and destinations also deny by default. See
+[`examples/sample-policy.yaml`](examples/sample-policy.yaml) for the complete
+example.
+
+## Tool-result sanitization and auditing
+
+`sanitize_tool_result()` recursively copies and sanitizes JSON-like values,
+including nested dictionaries, lists, and dictionary keys. Unsupported values
+and sanitized-key collisions fail closed rather than returning a potentially
+unsafe value.
+
+Each `TrustGate` uses an in-memory `InMemoryAuditSink` by default; an
+application can provide an `AuditSink` to `TrustGate(...)`. Events record only
+safe metadata: session ID, event type, entity types, tokens, destination, and
+release decision. They never include vault mappings or raw sensitive values.
+
+## Workflow
 
 ```text
 User input -> sanitize -> LLM sees tokens
 LLM tool call -> explicit policy ALLOW -> tool receives approved raw values
 Tool result -> sanitize -> LLM sees tokens
 ```
-
-The planned policy schema is documented in
-[`examples/sample-policy.yaml`](examples/sample-policy.yaml). It cannot yet be
-loaded by `TrustGate.from_yaml()`.
 
 ## Non-goals
 
