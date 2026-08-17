@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+from hashlib import sha256
 from threading import RLock
 from typing import Protocol
 
 from .models import AuditEvent
+
+
+def audit_identifier(value: str) -> str:
+    """Return a fixed-format identifier without retaining the source text."""
+    digest = sha256(value.encode("utf-8")).hexdigest()
+    return f"audit_{digest}"
 
 
 class AuditSink(Protocol):

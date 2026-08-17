@@ -7,6 +7,7 @@ from trustgate import AuditEvent, AuditEventType, ModelValidationError, Sensitiv
 
 RAW_ACCOUNT = "RAW_ACCOUNT_DO_NOT_LEAK_12345678"
 RAW_PERSON = "RAW_PERSON_DO_NOT_LEAK_JANE_SMITH"
+AUDIT_IDENTIFIER = "audit_" + "0" * 64
 
 
 def test_no_raw_value_assertion_accepts_safe_nested_values() -> None:
@@ -49,8 +50,8 @@ def test_audit_event_serialization_has_no_raw_sensitive_values() -> None:
     event = AuditEvent(
         event_type=AuditEventType.VALUE_SANITIZED,
         session_id="84b4c05e5fca4e68909a5b6df2ce8194",
-        entity_types=("ACCOUNT_NUMBER", "PERSON"),
-        tokens=("[ACCOUNT_NUMBER_1]", "[PERSON_1]"),
+        entity_types=(AUDIT_IDENTIFIER,),
+        tokens=(AUDIT_IDENTIFIER,),
     )
 
     assert_no_raw_sensitive_values(event, RAW_ACCOUNT, RAW_PERSON)

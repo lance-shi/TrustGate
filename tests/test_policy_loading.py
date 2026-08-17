@@ -65,3 +65,34 @@ def test_from_yaml_hides_a_missing_sensitive_path() -> None:
         TrustGate.from_yaml(f"{raw_value}.yaml")
 
     assert_no_raw_sensitive_values(error.value, raw_value)
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        """\
+version: 1
+data_policies:
+  ACCOUNT_NUMBER:
+    external_llm: tokenize
+    destinations:
+      get_account: deny
+      get_account: allow
+""",
+        """\
+version: 1
+data_policies:
+  ACCOUNT_NUMBER:
+    <<: &defaults
+      external_llm: tokenize
+      destinations:
+        get_account: allow
+""",
+    ],
+)
+def test_from_yaml_rejects_duplicate_keys_and_merge_keys(tmp_path: object, document: str) -> None:
+    path = tmp_path / "ambiguous.yaml"  # type: ignore[operator]
+    path.write_text(document, encoding="utf-8")
+
+    with pytest.raises(PolicyValidationError):
+        TrustGate.from_yaml(path)

@@ -7,6 +7,8 @@ from security_assertions import assert_no_raw_sensitive_values
 
 from trustgate import (
     AuditEventType,
+    AuditFailureReason,
+    DetectionUnavailableError,
     InMemoryAuditSink,
     SensitiveEntity,
     ToolResultSanitizationError,
@@ -77,7 +79,7 @@ def test_tool_result_sanitization_audit_contains_only_safe_metadata() -> None:
         AuditEventType.TOOL_RESULT_SANITIZED,
         AuditEventType.SESSION_CLOSED,
     ]
-    assert events[1].entity_types == ("ACCOUNT_NUMBER", "PERSON")
+    assert all(identifier.startswith("audit_") for identifier in events[1].entity_types)
     assert_no_raw_sensitive_values(events, RAW_ACCOUNT, RAW_PERSON)
 
 
@@ -90,6 +92,8 @@ def test_tool_result_key_collision_fails_closed_without_disclosing_raw_values() 
         session.sanitize_tool_result({RAW_PERSON: "first", token: "second"})
 
     assert_no_raw_sensitive_values(error.value, RAW_PERSON)
+    assert audit_sink.events[-1].event_type is AuditEventType.TOOL_RESULT_SANITIZATION_FAILED
+    assert audit_sink.events[-1].failure_reason is AuditFailureReason.UNSAFE_RESULT_STRUCTURE
 
 
 def test_non_json_tool_result_fails_closed_without_rendering_its_value() -> None:
@@ -99,9 +103,32 @@ def test_non_json_tool_result_fails_closed_without_rendering_its_value() -> None
         def __repr__(self) -> str:
             return raw_value
 
-    session = _session(InMemoryAuditSink())
+    audit_sink = InMemoryAuditSink()
+    session = _session(audit_sink)
 
     with pytest.raises(ToolResultSanitizationError) as error:
         session.sanitize_tool_result(UnsupportedResult())  # type: ignore[arg-type]
 
     assert_no_raw_sensitive_values(error.value, raw_value)
+    assert audit_sink.events[-1].event_type is AuditEventType.TOOL_RESULT_SANITIZATION_FAILED
+    assert audit_sink.events[-1].failure_reason is AuditFailureReason.UNSAFE_RESULT_STRUCTURE
+
+
+def test_tool_result_detection_failure_is_audited_without_raw_text() -> None:
+    raw_value = "RAW_TOOL_RESULT_DO_NOT_LEAK_12345678"
+
+    class FailingDetector:
+        def detect(self, text: str) -> tuple[SensitiveEntity, ...]:
+            raise RuntimeError(text)
+
+    audit_sink = InMemoryAuditSink()
+    session = TrustSession(detector=FailingDetector(), audit_sink=audit_sink)
+
+    with pytest.raises(DetectionUnavailableError) as error:
+        session.sanitize_tool_result({"value": raw_value})
+
+    assert_no_raw_sensitive_values(error.value, raw_value)
+    event = audit_sink.events[-1]
+    assert event.event_type is AuditEventType.TOOL_RESULT_SANITIZATION_FAILED
+    assert event.failure_reason is AuditFailureReason.DETECTION_UNAVAILABLE
+    assert_no_raw_sensitive_values(event, raw_value)

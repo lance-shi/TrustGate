@@ -20,6 +20,7 @@ from .gate import TrustGate
 from .models import (
     AuditEvent,
     AuditEventType,
+    AuditFailureReason,
     DataPolicy,
     DataReleaseDecision,
     DataReleaseRequest,
@@ -35,6 +36,7 @@ from .session import TrustSession
 
 __all__ = [
     "AuditEvent",
+    "AuditFailureReason",
     "AuditEventType",
     "AuditSink",
     "CrossSessionTokenError",

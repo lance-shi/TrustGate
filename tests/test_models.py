@@ -13,9 +13,11 @@ from trustgate import (
     ToolCall,
 )
 
+AUDIT_IDENTIFIER = "audit_" + "0" * 64
+
 
 def test_core_models_accept_valid_non_sensitive_metadata() -> None:
-    entity = SensitiveEntity(entity_type="ACCOUNT_NUMBER", start=2, end=10, score=0.95)
+    SensitiveEntity(entity_type="ACCOUNT_NUMBER", start=2, end=10, score=0.95)
     token = SensitiveToken(value="[ACCOUNT_NUMBER_1]", entity_type="ACCOUNT_NUMBER")
     tool_call = ToolCall(name="get_account", arguments={"account": token.value})
     result = DataReleaseResult(
@@ -26,13 +28,13 @@ def test_core_models_accept_valid_non_sensitive_metadata() -> None:
     event = AuditEvent(
         event_type=AuditEventType.TOOL_RELEASE_ALLOWED,
         session_id="session-opaque-id",
-        entity_types=(entity.entity_type,),
-        destination=tool_call.name,
+        entity_types=(AUDIT_IDENTIFIER,),
+        destination=AUDIT_IDENTIFIER,
         decision=result.decision,
-        tokens=(token.value,),
+        tokens=(AUDIT_IDENTIFIER,),
     )
 
-    assert event.model_dump(mode="json")["tokens"] == ["[ACCOUNT_NUMBER_1]"]
+    assert event.model_dump(mode="json")["tokens"] == [AUDIT_IDENTIFIER]
 
 
 @pytest.mark.parametrize(

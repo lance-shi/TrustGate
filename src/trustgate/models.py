@@ -23,6 +23,10 @@ TokenValue = Annotated[
     Field(pattern=r"^\[[A-Z][A-Z0-9_]*_[1-9][0-9]*\]$", min_length=5),
 ]
 Destination = Annotated[str, Field(min_length=1, max_length=256)]
+AuditIdentifier = Annotated[
+    str,
+    Field(pattern=r"^audit_[a-f0-9]{64}$", min_length=70, max_length=70),
+]
 SAFE_MODEL_CONFIG = ConfigDict(extra="forbid", frozen=True, hide_input_in_errors=True)
 
 
@@ -149,6 +153,14 @@ class AuditEventType(StrEnum):
     TOOL_RELEASE_ALLOWED = "tool_release_allowed"
     TOOL_RELEASE_DENIED = "tool_release_denied"
     TOOL_RESULT_SANITIZED = "tool_result_sanitized"
+    TOOL_RESULT_SANITIZATION_FAILED = "tool_result_sanitization_failed"
+
+
+class AuditFailureReason(StrEnum):
+    """Safe categories for tool-result sanitization failures."""
+
+    DETECTION_UNAVAILABLE = "detection_unavailable"
+    UNSAFE_RESULT_STRUCTURE = "unsafe_result_structure"
 
 
 class SensitiveEntity(SafePublicModel):
@@ -196,8 +208,9 @@ class AuditEvent(SafePublicModel):
 
     event_type: AuditEventType
     session_id: str = Field(min_length=1)
-    entity_types: tuple[EntityType, ...] = ()
-    destination: Destination | None = None
+    entity_types: tuple[AuditIdentifier, ...] = ()
+    destination: AuditIdentifier | None = None
     decision: DataReleaseDecision | None = None
-    tokens: tuple[TokenValue, ...] = ()
+    tokens: tuple[AuditIdentifier, ...] = ()
+    failure_reason: AuditFailureReason | None = None
     occurred_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

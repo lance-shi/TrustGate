@@ -8,7 +8,7 @@ from types import TracebackType
 from typing import Protocol
 from uuid import uuid4
 
-from .audit import AuditSink, InMemoryAuditSink
+from .audit import AuditSink, InMemoryAuditSink, audit_identifier
 from .detection import PresidioDetector
 from .exceptions import (
     DataReleaseDenied,
@@ -22,6 +22,7 @@ from .exceptions import (
 from .models import (
     AuditEvent,
     AuditEventType,
+    AuditFailureReason,
     DataReleaseDecision,
     DataReleaseRequest,
     DataReleaseResult,
@@ -61,7 +62,7 @@ class TrustSession:
         self._vault = TokenVault(session_id=self._session_id, registry=_PROCESS_TOKEN_REGISTRY)
         self._detector = detector
         self._policy = policy
-        self._audit_sink = audit_sink or InMemoryAuditSink()
+        self._audit_sink = audit_sink if audit_sink is not None else InMemoryAuditSink()
         self._record_audit(AuditEventType.SESSION_OPENED)
 
     @property
@@ -139,12 +140,13 @@ class TrustSession:
                     tokens=tuple(tokens),
                 )
                 raise
-            self._record_audit(
-                AuditEventType.TOOL_RELEASE_ALLOWED,
-                destination=tool_call.name,
-                decision=DataReleaseDecision.ALLOW,
-                tokens=tuple(tokens),
-            )
+            if tokens:
+                self._record_audit(
+                    AuditEventType.TOOL_RELEASE_ALLOWED,
+                    destination=tool_call.name,
+                    decision=DataReleaseDecision.ALLOW,
+                    tokens=tuple(tokens),
+                )
             return arguments
 
     def sanitize_tool_result(self, result: JsonValue) -> JsonValue:
@@ -152,7 +154,22 @@ class TrustSession:
         with self._lock:
             self._ensure_open()
             tokens: list[SensitiveToken] = []
-            sanitized = self._sanitize_result_value(value=result, tokens=tokens)
+            try:
+                sanitized = self._sanitize_result_value(value=result, tokens=tokens)
+            except DetectionUnavailableError:
+                self._record_audit(
+                    AuditEventType.TOOL_RESULT_SANITIZATION_FAILED,
+                    failure_reason=AuditFailureReason.DETECTION_UNAVAILABLE,
+                    tokens=tuple(tokens),
+                )
+                raise
+            except ToolResultSanitizationError:
+                self._record_audit(
+                    AuditEventType.TOOL_RESULT_SANITIZATION_FAILED,
+                    failure_reason=AuditFailureReason.UNSAFE_RESULT_STRUCTURE,
+                    tokens=tuple(tokens),
+                )
+                raise
             self._record_audit(AuditEventType.TOOL_RESULT_SANITIZED, tokens=tuple(tokens))
             return sanitized
 
@@ -277,17 +294,19 @@ class TrustSession:
         destination: str | None = None,
         decision: DataReleaseDecision | None = None,
         tokens: tuple[SensitiveToken, ...] = (),
+        failure_reason: AuditFailureReason | None = None,
     ) -> None:
-        unique_tokens = tuple(dict.fromkeys(token.value for token in tokens))
-        entity_types = tuple(dict.fromkeys(token.entity_type for token in tokens))
+        unique_tokens = tuple(dict.fromkeys(audit_identifier(token.value) for token in tokens))
+        entity_types = tuple(dict.fromkeys(audit_identifier(token.entity_type) for token in tokens))
         self._audit_sink.record(
             AuditEvent(
                 event_type=event_type,
                 session_id=self._session_id,
                 entity_types=entity_types,
-                destination=destination,
+                destination=audit_identifier(destination) if destination is not None else None,
                 decision=decision,
                 tokens=unique_tokens,
+                failure_reason=failure_reason,
             )
         )
 

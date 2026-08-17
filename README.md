@@ -102,8 +102,9 @@ unsafe value.
 
 Each `TrustGate` uses an in-memory `InMemoryAuditSink` by default; an
 application can provide an `AuditSink` to `TrustGate(...)`. Events record only
-safe metadata: session ID, event type, entity types, tokens, destination, and
-release decision. They never include vault mappings or raw sensitive values.
+safe metadata: session ID, event type, release decision, and opaque audit
+identifiers for entity types, tokens, and destination. They never include vault
+mappings or raw sensitive values.
 
 ## Workflow
 
