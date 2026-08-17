@@ -18,12 +18,15 @@ from .gate import TrustGate
 from .models import (
     AuditEvent,
     AuditEventType,
+    DataPolicy,
     DataReleaseDecision,
     DataReleaseRequest,
     DataReleaseResult,
+    ExternalLLMHandling,
     SensitiveEntity,
     SensitiveToken,
     ToolCall,
+    TrustPolicy,
 )
 from .session import TrustSession
 
@@ -31,9 +34,11 @@ __all__ = [
     "AuditEvent",
     "AuditEventType",
     "CrossSessionTokenError",
+    "DataPolicy",
     "DataReleaseDecision",
     "DataReleaseDenied",
     "DetectionUnavailableError",
+    "ExternalLLMHandling",
     "DataReleaseRequest",
     "DataReleaseResult",
     "FeatureUnavailableError",
@@ -48,6 +53,7 @@ __all__ = [
     "ToolCall",
     "TrustGate",
     "TrustGateError",
+    "TrustPolicy",
     "TrustSession",
     "UnknownTokenError",
 ]

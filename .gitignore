@@ -28,3 +28,8 @@ dist/
 Thumbs.db
 # Local cross-session implementation notes.
 implementation.md
+
+# Local pet-generation artifacts
+pet-runs/
+rem-contact-v1.png
+rem-validation-v1.json

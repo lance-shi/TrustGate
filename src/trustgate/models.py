@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Annotated, Any, Mapping, Self
+from typing import Annotated, Any, ClassVar, Literal, Mapping, Self
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from typing_extensions import TypeAliasType
 
-from .exceptions import ModelValidationError
+from .exceptions import ModelValidationError, PolicyValidationError
 
 JsonValue = TypeAliasType(
     "JsonValue",
@@ -29,6 +29,7 @@ class SafePublicModel(BaseModel):
     """A public model that never exposes invalid caller input through errors."""
 
     model_config = SAFE_MODEL_CONFIG
+    validation_error_type: ClassVar[type[ModelValidationError]] = ModelValidationError
 
     def __init__(self, /, **data: object) -> None:
         try:
@@ -37,7 +38,7 @@ class SafePublicModel(BaseModel):
             pass
         else:
             return
-        raise ModelValidationError
+        raise self.validation_error_type
 
     @classmethod
     def model_validate(cls, *args: object, **kwargs: object) -> Self:
@@ -45,7 +46,7 @@ class SafePublicModel(BaseModel):
             return super().model_validate(*args, **kwargs)
         except ValidationError:
             pass
-        raise ModelValidationError
+        raise cls.validation_error_type
 
     @classmethod
     def model_validate_json(cls, *args: object, **kwargs: object) -> Self:
@@ -53,7 +54,7 @@ class SafePublicModel(BaseModel):
             return super().model_validate_json(*args, **kwargs)
         except ValidationError:
             pass
-        raise ModelValidationError
+        raise cls.validation_error_type
 
     @classmethod
     def model_validate_strings(cls, *args: object, **kwargs: object) -> Self:
@@ -61,7 +62,7 @@ class SafePublicModel(BaseModel):
             return super().model_validate_strings(*args, **kwargs)
         except ValidationError:
             pass
-        raise ModelValidationError
+        raise cls.validation_error_type
 
     @classmethod
     def model_construct(
@@ -92,6 +93,32 @@ class DataReleaseDecision(StrEnum):
 
     ALLOW = "allow"
     DENY = "deny"
+
+
+class ExternalLLMHandling(StrEnum):
+    """The only permitted representation of sensitive data at an LLM boundary."""
+
+    TOKENIZE = "tokenize"
+
+
+class SafePolicyModel(SafePublicModel):
+    """A validated policy model whose failures remain non-sensitive."""
+
+    validation_error_type: ClassVar[type[PolicyValidationError]] = PolicyValidationError
+
+
+class DataPolicy(SafePolicyModel):
+    """Destination-specific release rules for one sensitive entity type."""
+
+    external_llm: ExternalLLMHandling
+    destinations: dict[Destination, DataReleaseDecision]
+
+
+class TrustPolicy(SafePolicyModel):
+    """The complete v0.1 default-deny data-release policy document."""
+
+    version: Literal[1]
+    data_policies: dict[EntityType, DataPolicy]
 
 
 class AuditEventType(StrEnum):
