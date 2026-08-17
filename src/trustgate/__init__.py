@@ -28,6 +28,7 @@ from .models import (
     ToolCall,
     TrustPolicy,
 )
+from .policy import decide_data_release
 from .session import TrustSession
 
 __all__ = [
@@ -41,6 +42,7 @@ __all__ = [
     "ExternalLLMHandling",
     "DataReleaseRequest",
     "DataReleaseResult",
+    "decide_data_release",
     "FeatureUnavailableError",
     "MalformedTokenError",
     "ModelValidationError",
