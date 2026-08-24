@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from .audit import AuditSink, InMemoryAuditSink, audit_identifier
 from .detection import PresidioDetector
+from .entity import EntityResolver
 from .exceptions import (
     DataReleaseDenied,
     DetectionUnavailableError,
@@ -60,6 +61,7 @@ class TrustSession:
         self._closed = False
         self._lock = RLock()
         self._vault = TokenVault(session_id=self._session_id, registry=_PROCESS_TOKEN_REGISTRY)
+        self._entity_resolver = EntityResolver()
         self._detector = detector
         self._policy = policy
         self._audit_sink = audit_sink if audit_sink is not None else InMemoryAuditSink()
@@ -101,6 +103,7 @@ class TrustSession:
             if self._closed:
                 return
             self._vault.clear()
+            self._entity_resolver.clear()
             self._closed = True
             self._record_audit(AuditEventType.SESSION_CLOSED)
 
@@ -199,13 +202,39 @@ class TrustSession:
         entities = self._detect(text)
         _validate_entity_ranges(entities, text_length=len(text))
         tokens: list[SensitiveToken] = []
-        sanitized = text
-        for entity in reversed(_merge_overlapping_entities(entities)):
+        replacements: list[tuple[SensitiveEntity, SensitiveToken]] = []
+        for entity in _merge_overlapping_entities(entities):
             raw_value = text[entity.start : entity.end]
-            token = self._vault.store(value=raw_value, entity_type=entity.entity_type)
+            token = self._tokenize_entity(
+                entity=entity,
+                raw_value=raw_value,
+            )
             tokens.append(token)
+            replacements.append((entity, token))
+
+        sanitized = text
+        for entity, token in reversed(replacements):
             sanitized = f"{sanitized[:entity.start]}{token.value}{sanitized[entity.end:]}"
-        return sanitized, tuple(reversed(tokens))
+        return sanitized, tuple(tokens)
+
+    def _tokenize_entity(
+        self,
+        *,
+        entity: SensitiveEntity,
+        raw_value: str,
+    ) -> SensitiveToken:
+        if entity.entity_type == "PERSON":
+            resolved_entity = self._entity_resolver.resolve_exact_full_name(
+                surface_form=raw_value,
+                start=entity.start,
+                end=entity.end,
+            )
+            if resolved_entity is not None:
+                return self._vault.store(
+                    value=resolved_entity.canonical_value,
+                    entity_type=resolved_entity.entity_type,
+                )
+        return self._vault.store(value=raw_value, entity_type=entity.entity_type)
 
     def _sanitize_result_value(
         self,
