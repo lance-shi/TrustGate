@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from unicodedata import category, normalize
+from unicodedata import normalize
 from uuid import uuid4
 
 _SUPPORTED_PERSON_TITLES = frozenset({"dr", "mr", "mrs", "ms"})
@@ -58,14 +58,18 @@ _REASONS_BY_RESOLUTION_STATE = {
 
 
 def _is_confirmed_resolution_state(state: EntityResolutionState) -> bool:
-    return state in _CONFIRMED_RESOLUTION_STATES
+    return isinstance(state, EntityResolutionState) and state in _CONFIRMED_RESOLUTION_STATES
 
 
 def _is_valid_resolution_reason(
     *,
-    state: EntityResolutionState,
-    reason: EntityResolutionReason,
+    state: object,
+    reason: object,
 ) -> bool:
+    if not isinstance(state, EntityResolutionState) or not isinstance(
+        reason, EntityResolutionReason
+    ):
+        return False
     return reason in _REASONS_BY_RESOLUTION_STATE[state]
 
 
@@ -77,13 +81,17 @@ def normalize_person_name(value: str) -> str:
     state; it is not safe audit, log, exception, or LLM-visible data.
     """
     normalized = normalize("NFKC", value).casefold()
-    without_punctuation = "".join(
-        " " if category(character).startswith("P") else character for character in normalized
-    )
-    components = without_punctuation.split()
-    if components and components[0] in _SUPPORTED_PERSON_TITLES:
+    components = normalized.split()
+    if components and _is_supported_person_title(components[0]):
         components = components[1:]
     return " ".join(components)
+
+
+def _is_supported_person_title(component: str) -> bool:
+    """Return whether one leading component is an explicitly supported title."""
+    return component in _SUPPORTED_PERSON_TITLES or (
+        component.endswith(".") and component[:-1] in _SUPPORTED_PERSON_TITLES
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,7 +173,6 @@ class EntityResolver:
 
     def __init__(self) -> None:
         self._entities_by_normalized_full_name: dict[str, EntityRecord] = {}
-        self._mentions: list[EntityMention] = []
 
     def resolve_exact_full_name(
         self,
@@ -182,22 +189,11 @@ class EntityResolver:
         """
         normalized_name = normalize_person_name(surface_form)
         if len(normalized_name.split()) < 2:
-            resolution = EntityResolution(
+            return EntityResolution(
                 state=EntityResolutionState.UNRESOLVED,
                 reason=EntityResolutionReason.INSUFFICIENT_NAME_COMPONENTS,
                 entity=None,
             )
-            self._mentions.append(
-                EntityMention(
-                    entity_type="PERSON",
-                    start=start,
-                    end=end,
-                    surface_form=surface_form,
-                    resolution_state=resolution.state,
-                    resolution_reason=resolution.reason,
-                )
-            )
-            return resolution
 
         entity = self._entities_by_normalized_full_name.get(normalized_name)
         if entity is None:
@@ -208,20 +204,8 @@ class EntityResolver:
             reason=EntityResolutionReason.EXACT_NORMALIZED_FULL_NAME,
             entity=entity,
         )
-        self._mentions.append(
-            EntityMention(
-                entity_type="PERSON",
-                start=start,
-                end=end,
-                surface_form=surface_form,
-                resolution_state=resolution.state,
-                resolution_reason=resolution.reason,
-                entity_id=entity.entity_id,
-            )
-        )
         return resolution
 
     def clear(self) -> None:
         """Discard all private entity values when the owning session closes."""
         self._entities_by_normalized_full_name.clear()
-        self._mentions.clear()

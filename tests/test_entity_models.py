@@ -49,8 +49,8 @@ def test_mention_can_reference_one_entity_without_exposing_surface_form_in_repr(
         ("  John   Smith  ", "john smith"),
         ("Mr John Smith", "john smith"),
         ("Mr. John Smith", "john smith"),
-        ("Dr., John-Smith", "john smith"),
-        ("John O'Connor", "john o connor"),
+        ("Dr. John-Smith", "john-smith"),
+        ("John O'Connor", "john o'connor"),
         ("Ｊｏｈｎ　Ｓｍｉｔｈ", "john smith"),
     ],
 )
@@ -121,6 +121,42 @@ def test_resolution_model_rejects_inconsistent_state_without_disclosure(
 
     assert raw_name not in str(error.value)
     assert raw_name not in repr(error.value)
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [
+        lambda raw_value: EntityResolution(
+            state=raw_value,
+            reason=EntityResolutionReason.INSUFFICIENT_NAME_COMPONENTS,
+            entity=None,
+        ),
+        lambda raw_value: EntityMention(
+            entity_type="PERSON",
+            start=0,
+            end=4,
+            surface_form="John",
+            resolution_state=raw_value,
+            resolution_reason=EntityResolutionReason.INSUFFICIENT_NAME_COMPONENTS,
+        ),
+    ],
+)
+def test_resolution_models_reject_an_invalid_state_without_disclosing_it(factory: object) -> None:
+    raw_state = "RAW_PERSON_DO_NOT_LEAK_invalid_state"
+
+    with pytest.raises(ValueError) as error:
+        factory(raw_state)  # type: ignore[operator]
+
+    assert raw_state not in str(error.value)
+    assert raw_state not in repr(error.value)
+
+
+def test_resolver_does_not_retain_raw_mentions_after_resolution() -> None:
+    resolver = EntityResolver()
+
+    resolver.resolve_exact_full_name(surface_form="John Smith", start=0, end=10)
+
+    assert not hasattr(resolver, "_mentions")
 
 
 @pytest.mark.parametrize(

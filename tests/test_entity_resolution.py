@@ -72,6 +72,25 @@ def test_exact_normalized_full_names_reuse_one_llm_visible_token() -> None:
     assert_no_raw_sensitive_values(sanitized, first_name, second_name)
 
 
+def test_identity_relevant_internal_punctuation_does_not_merge_full_names() -> None:
+    hyphenated_name = "John-Smith"
+    spaced_name = "John Smith"
+    text = f"{hyphenated_name} met {spaced_name}."
+    session = _person_gate().session()
+    session._detector = StaticDetector(
+        (
+            _person(0, len(hyphenated_name)),
+            _person(len(hyphenated_name) + 5, len(text) - 1),
+        )
+    )
+
+    sanitized = session.sanitize(text)
+    match = fullmatch(r"\[PERSON_([1-9][0-9]*)\] met \[PERSON_([1-9][0-9]*)\]\.", sanitized)
+
+    assert match is not None
+    assert match.group(1) != match.group(2)
+
+
 def test_exact_resolution_rehydrates_the_first_canonical_value_only_for_the_tool() -> None:
     canonical_value = "Ada Lovelace"
     equivalent_mention = "ADA LOVELACE"
