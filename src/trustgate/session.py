@@ -224,12 +224,14 @@ class TrustSession:
         raw_value: str,
     ) -> SensitiveToken:
         if entity.entity_type == "PERSON":
-            resolved_entity = self._entity_resolver.resolve_exact_full_name(
+            resolution = self._entity_resolver.resolve_exact_full_name(
                 surface_form=raw_value,
                 start=entity.start,
                 end=entity.end,
             )
-            if resolved_entity is not None:
+            if resolution.is_confirmed:
+                resolved_entity = resolution.entity
+                assert resolved_entity is not None
                 return self._vault.store(
                     value=resolved_entity.canonical_value,
                     entity_type=resolved_entity.entity_type,
