@@ -16,6 +16,14 @@ class StaticDetector:
         return self.entities
 
 
+@dataclass(frozen=True)
+class MappingDetector:
+    entities_by_text: dict[str, tuple[SensitiveEntity, ...]]
+
+    def detect(self, text: str) -> tuple[SensitiveEntity, ...]:
+        return self.entities_by_text.get(text, ())
+
+
 def _person(start: int, end: int) -> SensitiveEntity:
     return SensitiveEntity(entity_type="PERSON", start=start, end=end, score=0.9)
 
@@ -65,6 +73,29 @@ def test_exact_resolution_rehydrates_the_first_canonical_value_only_for_the_tool
     assert session.rehydrate_for_tool(
         ToolCall(name="lookup_person", arguments={"person": token})
     ) == {"person": canonical_value}
+
+
+def test_tool_results_share_the_entity_token_and_audit_no_raw_values() -> None:
+    canonical_value = "Ada Lovelace"
+    equivalent_mention = "MR. ADA LOVELACE"
+    audit_sink = InMemoryAuditSink()
+    session = _person_gate(audit_sink=audit_sink).session()
+    session._detector = MappingDetector(
+        {
+            canonical_value: (_person(0, len(canonical_value)),),
+            equivalent_mention: (_person(0, len(equivalent_mention)),),
+        }
+    )
+
+    first_result = session.sanitize_tool_result({"owner": canonical_value})
+    second_result = session.sanitize_tool_result({"owner": equivalent_mention})
+    token = first_result["owner"]
+
+    assert token == second_result["owner"]
+    assert session.rehydrate_for_tool(
+        ToolCall(name="lookup_person", arguments={"person": token})
+    ) == {"person": canonical_value}
+    assert_no_raw_sensitive_values(audit_sink.events, canonical_value, equivalent_mention)
 
 
 def test_single_component_names_do_not_merge_on_casefolding() -> None:
