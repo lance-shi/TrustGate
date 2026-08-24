@@ -3,9 +3,20 @@
 from dataclasses import dataclass
 from re import fullmatch
 
+import pytest
 from security_assertions import assert_no_raw_sensitive_values
 
-from trustgate import InMemoryAuditSink, SensitiveEntity, ToolCall, TrustGate, TrustPolicy
+from trustgate import (
+    AuditEventType,
+    CrossSessionTokenError,
+    DataReleaseDenied,
+    InMemoryAuditSink,
+    SensitiveEntity,
+    SessionClosedError,
+    ToolCall,
+    TrustGate,
+    TrustPolicy,
+)
 
 
 @dataclass(frozen=True)
@@ -96,6 +107,62 @@ def test_tool_results_share_the_entity_token_and_audit_no_raw_values() -> None:
         ToolCall(name="lookup_person", arguments={"person": token})
     ) == {"person": canonical_value}
     assert_no_raw_sensitive_values(audit_sink.events, canonical_value, equivalent_mention)
+
+
+def test_canonical_value_is_not_rehydrated_when_its_destination_is_denied() -> None:
+    canonical_value = "Ada Lovelace"
+    audit_sink = InMemoryAuditSink()
+    gate = TrustGate(
+        audit_sink=audit_sink,
+        policy=TrustPolicy(
+            version=1,
+            data_policies={
+                "PERSON": {
+                    "external_llm": "tokenize",
+                    "destinations": {"lookup_person": "deny"},
+                }
+            },
+        ),
+    )
+    session = gate.session()
+    session._detector = StaticDetector((_person(0, len(canonical_value)),))
+    token = session.sanitize(canonical_value)
+
+    with pytest.raises(DataReleaseDenied) as error:
+        session.rehydrate_for_tool(ToolCall(name="lookup_person", arguments={"person": token}))
+
+    assert audit_sink.events[-1].event_type is AuditEventType.TOOL_RELEASE_DENIED
+    assert_no_raw_sensitive_values(error.value, canonical_value)
+    assert_no_raw_sensitive_values(audit_sink.events, canonical_value)
+
+
+def test_canonical_entity_token_cannot_be_replayed_in_another_session() -> None:
+    canonical_value = "Ada Lovelace"
+    gate = _person_gate()
+    owner_session = gate.session()
+    owner_session._detector = StaticDetector((_person(0, len(canonical_value)),))
+    token = owner_session.sanitize(canonical_value)
+    other_session = gate.session()
+
+    with pytest.raises(CrossSessionTokenError) as error:
+        other_session.rehydrate_for_tool(
+            ToolCall(name="lookup_person", arguments={"person": token})
+        )
+
+    assert_no_raw_sensitive_values(error.value, canonical_value)
+
+
+def test_closed_session_cannot_rehydrate_a_canonical_entity_token() -> None:
+    canonical_value = "Ada Lovelace"
+    session = _person_gate().session()
+    session._detector = StaticDetector((_person(0, len(canonical_value)),))
+    token = session.sanitize(canonical_value)
+    session.close()
+
+    with pytest.raises(SessionClosedError) as error:
+        session.rehydrate_for_tool(ToolCall(name="lookup_person", arguments={"person": token}))
+
+    assert_no_raw_sensitive_values(error.value, canonical_value)
 
 
 def test_single_component_names_do_not_merge_on_casefolding() -> None:
