@@ -18,7 +18,8 @@ TrustGate is pre-alpha. The current implementation provides:
 - Process-local, in-memory audit events containing only safe metadata.
 - Session cleanup and cross-session token isolation.
 - Conservative session-local person resolution for normalized full names and
-  uniquely matching first names or title-plus-surname mentions.
+  uniquely matching first names, title-plus-surname mentions, and built-in
+  given-name aliases.
 
 `rehydrate_for_user()` is intentionally not implemented. TrustGate also remains
 framework-independent and has no persistent audit or vault storage.
@@ -70,7 +71,18 @@ state, even after later input supplies a matching full name. Unconfirmed
 mentions never become candidate identities. Each occurrence retains private
 state and reason metadata without retaining its raw text in mention history.
 Tokens always rehydrate to their original canonical value, subject to the
-destination's explicit release policy. Alias resolution is not implemented yet.
+destination's explicit release policy.
+
+The small built-in alias table supports `Jo` -> `Joanna`, `Joseph`, or `Joanne`,
+and `Joe` -> `Joseph`. Alias relations generate candidates, never automatic
+merges. For example, `Jo Taylor` can reuse a known `Joanna Taylor` token, but
+remains ambiguous if `Joseph Taylor` is also known. Any supplied middle names
+and surname must match exactly. Titled surname-only mentions do not use aliases.
+Relations are directional and direct: sharing an alias does not make two full
+names equivalent, and reverse/transitive relations are not inferred. Exact,
+partial, and alias candidates are considered together; conflicting identities
+remain ambiguous even when one candidate is an exact match. Caller-provided
+session aliases are not implemented yet.
 
 ## Language support and local model setup
 

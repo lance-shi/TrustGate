@@ -14,6 +14,16 @@ from unicodedata import normalize
 from uuid import uuid4
 
 _SUPPORTED_PERSON_TITLES = frozenset({"dr", "mr", "mrs", "ms"})
+# Direct nickname -> given-name relations, not equivalence classes. Sharing a
+# nickname does not make two given names equivalent. No transitive expansion.
+_BUILTIN_PERSON_ALIASES = frozenset(
+    {
+        ("jo", "joanna"),
+        ("jo", "joseph"),
+        ("jo", "joanne"),
+        ("joe", "joseph"),
+    }
+)
 
 
 class EntityResolutionState(StrEnum):
@@ -215,6 +225,33 @@ class PartialNameResolver:
         )
 
 
+class AliasResolver:
+    """Generate candidates from direct many-to-many given-name alias relations.
+
+    An untitled singleton can expand to known full-name candidates. For a
+    multi-component mention, every remaining component must match exactly,
+    including middle names and surname. Titled singletons denote surnames and
+    never use this given-name alias table. Only EntityResolver decides whether
+    the complete candidate set permits a merge.
+    """
+
+    def candidates(
+        self, *, name: PersonName, identities: tuple[PersonIdentity, ...]
+    ) -> tuple[EntityCandidate, ...]:
+        if not name.components or (len(name.components) == 1 and name.title is not None):
+            return ()
+        return tuple(
+            EntityCandidate(
+                entity_id=identity.entity_id,
+                reason=EntityResolutionReason.UNIQUE_ALIAS_MATCH,
+            )
+            for identity in identities
+            if len(identity.name.components) >= 2
+            and (name.components[0], identity.name.components[0]) in _BUILTIN_PERSON_ALIASES
+            and (len(name.components) == 1 or name.components[1:] == identity.name.components[1:])
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class EntityRecord:
     """One session-local sensitive entity and its canonical tool value."""
@@ -328,6 +365,7 @@ class EntityResolver:
         self._candidate_producers: tuple[NameCandidateProducer, ...] = (
             ExactNameResolver(),
             PartialNameResolver(),
+            AliasResolver(),
         )
         self._unconfirmed_by_surface_form: dict[str, PersonResolution] = {}
         self._mention_states: list[PersonMentionState] = []
@@ -345,12 +383,9 @@ class EntityResolver:
         result = self._unconfirmed_by_surface_form.get(surface_form)
         if result is None:
             name = PersonName.parse(surface_form)
-            if len(name.components) >= 2:
-                resolution = self.resolve_exact_full_name(
-                    surface_form=surface_form, start=start, end=end
-                )
-            else:
-                resolution = self._resolve_candidates(self._collect_candidates(name))
+            resolution = self._resolve_candidates(self._collect_candidates(name))
+            if resolution.state is EntityResolutionState.UNRESOLVED and len(name.components) >= 2:
+                resolution = self._register_full_name(surface_form=surface_form, name=name)
             token_entity = resolution.entity
             if token_entity is None:
                 token_entity = EntityRecord.create(
@@ -390,7 +425,7 @@ class EntityResolver:
 
         This exact-only entry point establishes confirmed full-name candidates.
         Single-component names remain unresolved here; the session pipeline
-        uses resolve_person() to consider partials and retain mention states.
+        uses resolve_person() to consider partials/aliases and retain mention states.
         """
         name = PersonName.parse(surface_form)
         if len(name.components) < 2:
@@ -400,10 +435,18 @@ class EntityResolver:
                 entity=None,
             )
 
-        resolution = self._resolve_candidates(self._collect_candidates(name))
+        resolution = self._resolve_candidates(
+            ExactNameResolver().candidates(
+                name=name, identities=tuple(self._identities_by_id.values())
+            )
+        )
         if resolution.state is not EntityResolutionState.UNRESOLVED:
             return resolution
 
+        return self._register_full_name(surface_form=surface_form, name=name)
+
+    def _register_full_name(self, *, surface_form: str, name: PersonName) -> EntityResolution:
+        """Establish a new candidate only after the complete set had no matches."""
         entity = EntityRecord.create(entity_type="PERSON", canonical_value=surface_form)
         self._entities_by_id[entity.entity_id] = entity
         self._identities_by_id[entity.entity_id] = PersonIdentity(

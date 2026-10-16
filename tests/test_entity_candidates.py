@@ -141,7 +141,7 @@ def test_resolver_collects_all_producers_before_deciding() -> None:
             return (EntityCandidate(second_id, Reason.UNIQUE_ALIAS_MATCH),)
 
     resolver._candidate_producers = (ExactNameResolver(), ConflictingProducer())
-    result = resolver.resolve_exact_full_name(surface_form="John Smith", start=0, end=10)
+    result = resolver.resolve_person(surface_form="John Smith", start=0, end=10).resolution
     assert result.state is State.AMBIGUOUS
     assert result.entity is None
     assert len(resolver._entities_by_id) == 2
