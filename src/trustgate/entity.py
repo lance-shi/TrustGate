@@ -32,6 +32,8 @@ class EntityResolutionReason(StrEnum):
     EXACT_NORMALIZED_FULL_NAME = "exact_normalized_full_name"
     INSUFFICIENT_NAME_COMPONENTS = "insufficient_name_components"
     UNIQUE_PARTIAL_NAME = "unique_partial_name"
+    FIRST_NAME_MATCH = "first_name_match"
+    LAST_NAME_MATCH = "last_name_match"
     UNIQUE_ALIAS_MATCH = "unique_alias_match"
     AMBIGUOUS_CANDIDATES = "ambiguous_candidates"
     NO_CANDIDATES = "no_candidates"
@@ -46,7 +48,13 @@ _CONFIRMED_RESOLUTION_STATES = frozenset(
 )
 _REASONS_BY_RESOLUTION_STATE = {
     EntityResolutionState.EXACT: frozenset({EntityResolutionReason.EXACT_NORMALIZED_FULL_NAME}),
-    EntityResolutionState.UNIQUE_PARTIAL: frozenset({EntityResolutionReason.UNIQUE_PARTIAL_NAME}),
+    EntityResolutionState.UNIQUE_PARTIAL: frozenset(
+        {
+            EntityResolutionReason.UNIQUE_PARTIAL_NAME,
+            EntityResolutionReason.FIRST_NAME_MATCH,
+            EntityResolutionReason.LAST_NAME_MATCH,
+        }
+    ),
     EntityResolutionState.UNIQUE_ALIAS: frozenset({EntityResolutionReason.UNIQUE_ALIAS_MATCH}),
     EntityResolutionState.UNRESOLVED: frozenset(
         {EntityResolutionReason.INSUFFICIENT_NAME_COMPONENTS, EntityResolutionReason.NO_CANDIDATES}
@@ -119,6 +127,8 @@ class PersonIdentity:
 _CANDIDATE_STATES = {
     EntityResolutionReason.EXACT_NORMALIZED_FULL_NAME: EntityResolutionState.EXACT,
     EntityResolutionReason.UNIQUE_PARTIAL_NAME: EntityResolutionState.UNIQUE_PARTIAL,
+    EntityResolutionReason.FIRST_NAME_MATCH: EntityResolutionState.UNIQUE_PARTIAL,
+    EntityResolutionReason.LAST_NAME_MATCH: EntityResolutionState.UNIQUE_PARTIAL,
     EntityResolutionReason.UNIQUE_ALIAS_MATCH: EntityResolutionState.UNIQUE_ALIAS,
 }
 
@@ -170,6 +180,38 @@ class ExactNameResolver:
             )
             for identity in identities
             if identity.name.components == name.components
+        )
+
+
+class PartialNameResolver:
+    """Produce every compatible candidate for a single-component mention.
+
+    For the supported English name order, an untitled singleton matches the
+    first component of a confirmed full name; a titled singleton matches the
+    last. Titles select the name position, without inferring gender or identity.
+    Middle names, initials, substrings, and aliases are not partial matches.
+
+    The caller supplies only previously confirmed session-local identities.
+    This producer is stateless and never decides uniqueness or registers an
+    entity. It is deliberately not enabled in the session pipeline yet.
+    """
+
+    def candidates(
+        self, *, name: PersonName, identities: tuple[PersonIdentity, ...]
+    ) -> tuple[EntityCandidate, ...]:
+        if len(name.components) != 1:
+            return ()
+        index = -1 if name.title is not None else 0
+        reason = (
+            EntityResolutionReason.LAST_NAME_MATCH
+            if name.title is not None
+            else EntityResolutionReason.FIRST_NAME_MATCH
+        )
+        return tuple(
+            EntityCandidate(entity_id=identity.entity_id, reason=reason)
+            for identity in identities
+            if len(identity.name.components) >= 2
+            and identity.name.components[index] == name.components[0]
         )
 
 
