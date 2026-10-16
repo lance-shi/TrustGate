@@ -8,7 +8,7 @@ data exposure, not action authorization.
 
 ## Status
 
-TrustGate is pre-alpha. The current Day 3 implementation provides:
+TrustGate is pre-alpha. The current implementation provides:
 
 - Local English sensitive-text detection and deterministic, session-scoped
   tokenization.
@@ -17,6 +17,8 @@ TrustGate is pre-alpha. The current Day 3 implementation provides:
 - Recursive tool-result sanitization before values become LLM-visible.
 - Process-local, in-memory audit events containing only safe metadata.
 - Session cleanup and cross-session token isolation.
+- Conservative session-local person resolution for normalized full names and
+  uniquely matching first names or title-plus-surname mentions.
 
 `rehydrate_for_user()` is intentionally not implemented. TrustGate also remains
 framework-independent and has no persistent audit or vault storage.
@@ -55,6 +57,20 @@ session closes. A token from another active session fails closed.
 `allow` decision for the tool destination. Unknown, malformed, cross-session,
 or denied tokens fail closed. Read and write-style destinations use the same
 data-release decision path.
+
+## Person-name resolution
+
+Person resolution uses local, deterministic English name rules. After a
+confirmed `John Smith`, `John` or `Mr Smith` can reuse that person's token only
+when there is exactly one compatible confirmed candidate. If `Larry Smith` is
+also known, `Mr Smith` receives an independent token with an ambiguous state.
+
+Identical unresolved or ambiguous mentions keep their own token and original
+state, even after later input supplies a matching full name. Unconfirmed
+mentions never become candidate identities. Each occurrence retains private
+state and reason metadata without retaining its raw text in mention history.
+Tokens always rehydrate to their original canonical value, subject to the
+destination's explicit release policy. Alias resolution is not implemented yet.
 
 ## Language support and local model setup
 

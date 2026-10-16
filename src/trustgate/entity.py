@@ -193,7 +193,7 @@ class PartialNameResolver:
 
     The caller supplies only previously confirmed session-local identities.
     This producer is stateless and never decides uniqueness or registers an
-    entity. It is deliberately not enabled in the session pipeline yet.
+    entity.
     """
 
     def candidates(
@@ -288,13 +288,96 @@ class EntityMention:
             raise ValueError("Invalid private entity mention.")
 
 
+@dataclass(frozen=True, slots=True)
+class PersonResolution:
+    """Separate confirmed identity evidence from an independent token identity.
+
+    An unconfirmed mention still needs a stable token and canonical surface
+    value. That token identity is never eligible as a matching candidate.
+    """
+
+    resolution: EntityResolution
+    token_entity: EntityRecord = field(repr=False)
+
+    def __post_init__(self) -> None:
+        if self.resolution.is_confirmed and self.resolution.entity != self.token_entity:
+            raise ValueError("Inconsistent private person resolution.")
+
+
+@dataclass(frozen=True, slots=True)
+class PersonMentionState:
+    """Immutable per-occurrence evidence without raw or normalized names.
+
+    The entity ID identifies token ownership; unresolved/ambiguous states do
+    not assert that the token identifies a previously confirmed person.
+    """
+
+    start: int
+    end: int
+    state: EntityResolutionState
+    reason: EntityResolutionReason
+    token_entity_id: str
+
+
 class EntityResolver:
-    """Resolve only exact normalized full-person-name matches within one session."""
+    """Decide person identity conservatively within one session."""
 
     def __init__(self) -> None:
         self._entities_by_id: dict[str, EntityRecord] = {}
         self._identities_by_id: dict[str, PersonIdentity] = {}
-        self._candidate_producers: tuple[NameCandidateProducer, ...] = (ExactNameResolver(),)
+        self._candidate_producers: tuple[NameCandidateProducer, ...] = (
+            ExactNameResolver(),
+            PartialNameResolver(),
+        )
+        self._unconfirmed_by_surface_form: dict[str, PersonResolution] = {}
+        self._mention_states: list[PersonMentionState] = []
+
+    def resolve_person(self, *, surface_form: str, start: int, end: int) -> PersonResolution:
+        """Resolve in observation order and freeze previously unconfirmed surfaces.
+
+        Full names establish confirmed candidates. Unconfirmed mentions are
+        retained separately by identical surface form, never promoted after
+        later input. Confirmed partials are reconsidered against the current
+        candidate set; earlier mention states and token values stay immutable.
+        """
+        if not surface_form or start < 0 or end - start != len(surface_form):
+            raise ValueError("Invalid private person mention.")
+        result = self._unconfirmed_by_surface_form.get(surface_form)
+        if result is None:
+            name = PersonName.parse(surface_form)
+            if len(name.components) >= 2:
+                resolution = self.resolve_exact_full_name(
+                    surface_form=surface_form, start=start, end=end
+                )
+            else:
+                resolution = self._resolve_candidates(self._collect_candidates(name))
+            token_entity = resolution.entity
+            if token_entity is None:
+                token_entity = EntityRecord.create(
+                    entity_type="PERSON", canonical_value=surface_form
+                )
+            result = PersonResolution(resolution=resolution, token_entity=token_entity)
+            if not resolution.is_confirmed:
+                self._unconfirmed_by_surface_form[surface_form] = result
+
+        self._mention_states.append(
+            PersonMentionState(
+                start=start,
+                end=end,
+                state=result.resolution.state,
+                reason=result.resolution.reason,
+                token_entity_id=result.token_entity.entity_id,
+            )
+        )
+        return result
+
+    def _collect_candidates(self, name: PersonName) -> tuple[EntityCandidate, ...]:
+        identities = tuple(self._identities_by_id.values())
+        return tuple(
+            candidate
+            for producer in self._candidate_producers
+            for candidate in producer.candidates(name=name, identities=identities)
+        )
 
     def resolve_exact_full_name(
         self,
@@ -305,9 +388,9 @@ class EntityResolver:
     ) -> EntityResolution:
         """Return the safe result of exact normalized full-name resolution.
 
-        A single-component or otherwise insufficient name is intentionally not
-        resolved here. It continues through the existing vault behavior until
-        the conservative partial and alias rules are implemented.
+        This exact-only entry point establishes confirmed full-name candidates.
+        Single-component names remain unresolved here; the session pipeline
+        uses resolve_person() to consider partials and retain mention states.
         """
         name = PersonName.parse(surface_form)
         if len(name.components) < 2:
@@ -317,13 +400,7 @@ class EntityResolver:
                 entity=None,
             )
 
-        identities = tuple(self._identities_by_id.values())
-        candidates = tuple(
-            candidate
-            for producer in self._candidate_producers
-            for candidate in producer.candidates(name=name, identities=identities)
-        )
-        resolution = self._resolve_candidates(candidates)
+        resolution = self._resolve_candidates(self._collect_candidates(name))
         if resolution.state is not EntityResolutionState.UNRESOLVED:
             return resolution
 
@@ -374,3 +451,5 @@ class EntityResolver:
         """Discard all private entity values when the owning session closes."""
         self._entities_by_id.clear()
         self._identities_by_id.clear()
+        self._unconfirmed_by_surface_form.clear()
+        self._mention_states.clear()

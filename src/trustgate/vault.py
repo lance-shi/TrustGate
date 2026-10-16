@@ -67,14 +67,24 @@ class TokenVault:
         self._registry = registry or TokenRegistry()
         self._entries_by_token: dict[str, VaultEntry] = {}
         self._tokens_by_value: dict[tuple[str, str], SensitiveToken] = {}
+        self._tokens_by_identity: dict[tuple[str, str], SensitiveToken] = {}
         self._lock = RLock()
 
-    def store(self, *, value: str, entity_type: str) -> SensitiveToken:
-        """Store a raw value and return its stable token for this vault."""
+    def store(
+        self, *, value: str, entity_type: str, identity_id: str | None = None
+    ) -> SensitiveToken:
+        """Store by entity identity, or by raw value for non-resolved data.
+
+        Identity-bound canonical values are immutable. Separate identities can
+        hold the same surface value without implicitly sharing a token.
+        """
         with self._lock:
-            mapping_key = (entity_type, value)
-            existing_token = self._tokens_by_value.get(mapping_key)
+            mappings = self._tokens_by_value if identity_id is None else self._tokens_by_identity
+            mapping_key = (entity_type, value if identity_id is None else identity_id)
+            existing_token = mappings.get(mapping_key)
             if existing_token is not None:
+                if self._entries_by_token[existing_token.value].value != value:
+                    raise ValueError("Cannot change a token's canonical value.")
                 return existing_token
 
             token = SensitiveToken(
@@ -82,7 +92,7 @@ class TokenVault:
                 entity_type=entity_type,
             )
             self._entries_by_token[token.value] = VaultEntry(value=value, entity_type=entity_type)
-            self._tokens_by_value[mapping_key] = token
+            mappings[mapping_key] = token
             return token
 
     def resolve(self, token: str) -> VaultEntry:
@@ -105,3 +115,4 @@ class TokenVault:
             self._registry.revoke(tuple(self._entries_by_token))
             self._entries_by_token.clear()
             self._tokens_by_value.clear()
+            self._tokens_by_identity.clear()

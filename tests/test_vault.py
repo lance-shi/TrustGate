@@ -69,3 +69,27 @@ def test_clear_removes_all_raw_mappings() -> None:
 
     with pytest.raises(UnknownTokenError):
         vault.resolve(token.value)
+
+
+def test_identity_tokens_do_not_merge_just_because_raw_values_are_equal() -> None:
+    vault = TokenVault()
+    first = vault.store(value="John", entity_type="PERSON", identity_id="first")
+    second = vault.store(value="John", entity_type="PERSON", identity_id="second")
+    by_value = vault.store(value="John", entity_type="PERSON")
+    assert len({first.value, second.value, by_value.value}) == 3
+    assert vault.store(value="John", entity_type="PERSON", identity_id="first") == first
+    vault.clear()
+    for token in (first, second, by_value):
+        with pytest.raises(UnknownTokenError):
+            vault.resolve(token.value)
+
+
+def test_identity_token_canonical_value_cannot_be_overwritten() -> None:
+    vault = TokenVault()
+    token = vault.store(value="John Smith", entity_type="PERSON", identity_id="first")
+    with pytest.raises(ValueError) as error:
+        vault.store(value="Larry Smith", entity_type="PERSON", identity_id="first")
+    assert vault.resolve(token.value).value == "John Smith"
+    for raw in ("John Smith", "Larry Smith"):
+        assert raw not in str(error.value)
+        assert raw not in repr(error.value)

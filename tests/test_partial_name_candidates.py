@@ -168,7 +168,7 @@ def test_generated_candidates_can_be_decided_by_the_central_resolver() -> None:
     assert result.entity is None
 
 
-def test_partial_matching_is_not_enabled_in_the_session_resolution_path_yet() -> None:
+def test_exact_only_entry_point_does_not_resolve_partial_mentions() -> None:
     resolver = EntityResolver()
     resolver.resolve_exact_full_name(surface_form="John Smith", start=0, end=10)
     result = resolver.resolve_exact_full_name(surface_form="John", start=0, end=4)
