@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import Protocol
 from unicodedata import normalize
 from uuid import uuid4
 
@@ -33,6 +34,7 @@ class EntityResolutionReason(StrEnum):
     UNIQUE_PARTIAL_NAME = "unique_partial_name"
     UNIQUE_ALIAS_MATCH = "unique_alias_match"
     AMBIGUOUS_CANDIDATES = "ambiguous_candidates"
+    NO_CANDIDATES = "no_candidates"
 
 
 _CONFIRMED_RESOLUTION_STATES = frozenset(
@@ -43,15 +45,11 @@ _CONFIRMED_RESOLUTION_STATES = frozenset(
     }
 )
 _REASONS_BY_RESOLUTION_STATE = {
-    EntityResolutionState.EXACT: frozenset(
-        {EntityResolutionReason.EXACT_NORMALIZED_FULL_NAME}
-    ),
-    EntityResolutionState.UNIQUE_PARTIAL: frozenset(
-        {EntityResolutionReason.UNIQUE_PARTIAL_NAME}
-    ),
+    EntityResolutionState.EXACT: frozenset({EntityResolutionReason.EXACT_NORMALIZED_FULL_NAME}),
+    EntityResolutionState.UNIQUE_PARTIAL: frozenset({EntityResolutionReason.UNIQUE_PARTIAL_NAME}),
     EntityResolutionState.UNIQUE_ALIAS: frozenset({EntityResolutionReason.UNIQUE_ALIAS_MATCH}),
     EntityResolutionState.UNRESOLVED: frozenset(
-        {EntityResolutionReason.INSUFFICIENT_NAME_COMPONENTS}
+        {EntityResolutionReason.INSUFFICIENT_NAME_COMPONENTS, EntityResolutionReason.NO_CANDIDATES}
     ),
     EntityResolutionState.AMBIGUOUS: frozenset({EntityResolutionReason.AMBIGUOUS_CANDIDATES}),
 }
@@ -80,11 +78,7 @@ def normalize_person_name(value: str) -> str:
     Its result may be sensitive and must remain in session-local resolver
     state; it is not safe audit, log, exception, or LLM-visible data.
     """
-    normalized = normalize("NFKC", value).casefold()
-    components = normalized.split()
-    if components and _is_supported_person_title(components[0]):
-        components = components[1:]
-    return " ".join(components)
+    return " ".join(PersonName.parse(value).components)
 
 
 def _is_supported_person_title(component: str) -> bool:
@@ -92,6 +86,91 @@ def _is_supported_person_title(component: str) -> bool:
     return component in _SUPPORTED_PERSON_TITLES or (
         component.endswith(".") and component[:-1] in _SUPPORTED_PERSON_TITLES
     )
+
+
+@dataclass(frozen=True, slots=True)
+class PersonName:
+    """Private normalized components; a titled singleton is a surname mention.
+
+    Components remain ordered, including middle names and internal punctuation.
+    No surname/given-name inference is made for other single-component names.
+    """
+
+    components: tuple[str, ...] = field(repr=False)
+    title: str | None = field(default=None, repr=False)
+
+    @classmethod
+    def parse(cls, value: str) -> PersonName:
+        components = normalize("NFKC", value).casefold().split()
+        title = None
+        if components and _is_supported_person_title(components[0]):
+            title = components.pop(0).removesuffix(".")
+        return cls(components=tuple(components), title=title)
+
+
+@dataclass(frozen=True, slots=True)
+class PersonIdentity:
+    """Immutable candidate-source view, without a canonical raw value."""
+
+    entity_id: str
+    name: PersonName = field(repr=False)
+
+
+_CANDIDATE_STATES = {
+    EntityResolutionReason.EXACT_NORMALIZED_FULL_NAME: EntityResolutionState.EXACT,
+    EntityResolutionReason.UNIQUE_PARTIAL_NAME: EntityResolutionState.UNIQUE_PARTIAL,
+    EntityResolutionReason.UNIQUE_ALIAS_MATCH: EntityResolutionState.UNIQUE_ALIAS,
+}
+
+
+@dataclass(frozen=True, slots=True)
+class EntityCandidate:
+    """Candidate evidence only; it neither holds raw values nor confirms identity."""
+
+    entity_id: str
+    reason: EntityResolutionReason
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.entity_id, str)
+            or len(self.entity_id) != 32
+            or any(char not in "0123456789abcdef" for char in self.entity_id)
+            or not isinstance(self.reason, EntityResolutionReason)
+            or self.reason not in _CANDIDATE_STATES
+        ):
+            raise ValueError("Invalid private entity candidate.")
+
+
+class NameCandidateProducer(Protocol):
+    """Shared boundary for exact, partial, and alias candidate generation.
+
+    Producers receive immutable session-local views and must not register or
+    merge entities. Only EntityResolver makes the final identity decision.
+    """
+
+    def candidates(
+        self, *, name: PersonName, identities: tuple[PersonIdentity, ...]
+    ) -> tuple[EntityCandidate, ...]:
+        """Return all matching entity IDs and safe reasons, without raw values."""
+        ...
+
+
+class ExactNameResolver:
+    """Produce candidates for equivalent complete normalized names only."""
+
+    def candidates(
+        self, *, name: PersonName, identities: tuple[PersonIdentity, ...]
+    ) -> tuple[EntityCandidate, ...]:
+        if len(name.components) < 2:
+            return ()
+        return tuple(
+            EntityCandidate(
+                entity_id=identity.entity_id,
+                reason=EntityResolutionReason.EXACT_NORMALIZED_FULL_NAME,
+            )
+            for identity in identities
+            if identity.name.components == name.components
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,10 +209,9 @@ class EntityResolution:
         return _is_confirmed_resolution_state(self.state)
 
     def __post_init__(self) -> None:
-        if (
-            not _is_valid_resolution_reason(state=self.state, reason=self.reason)
-            or self.is_confirmed != (self.entity is not None)
-        ):
+        if not _is_valid_resolution_reason(
+            state=self.state, reason=self.reason
+        ) or self.is_confirmed != (self.entity is not None):
             raise ValueError("Invalid private entity resolution.")
 
 
@@ -172,7 +250,9 @@ class EntityResolver:
     """Resolve only exact normalized full-person-name matches within one session."""
 
     def __init__(self) -> None:
-        self._entities_by_normalized_full_name: dict[str, EntityRecord] = {}
+        self._entities_by_id: dict[str, EntityRecord] = {}
+        self._identities_by_id: dict[str, PersonIdentity] = {}
+        self._candidate_producers: tuple[NameCandidateProducer, ...] = (ExactNameResolver(),)
 
     def resolve_exact_full_name(
         self,
@@ -187,25 +267,68 @@ class EntityResolver:
         resolved here. It continues through the existing vault behavior until
         the conservative partial and alias rules are implemented.
         """
-        normalized_name = normalize_person_name(surface_form)
-        if len(normalized_name.split()) < 2:
+        name = PersonName.parse(surface_form)
+        if len(name.components) < 2:
             return EntityResolution(
                 state=EntityResolutionState.UNRESOLVED,
                 reason=EntityResolutionReason.INSUFFICIENT_NAME_COMPONENTS,
                 entity=None,
             )
 
-        entity = self._entities_by_normalized_full_name.get(normalized_name)
-        if entity is None:
-            entity = EntityRecord.create(entity_type="PERSON", canonical_value=surface_form)
-            self._entities_by_normalized_full_name[normalized_name] = entity
-        resolution = EntityResolution(
+        identities = tuple(self._identities_by_id.values())
+        candidates = tuple(
+            candidate
+            for producer in self._candidate_producers
+            for candidate in producer.candidates(name=name, identities=identities)
+        )
+        resolution = self._resolve_candidates(candidates)
+        if resolution.state is not EntityResolutionState.UNRESOLVED:
+            return resolution
+
+        entity = EntityRecord.create(entity_type="PERSON", canonical_value=surface_form)
+        self._entities_by_id[entity.entity_id] = entity
+        self._identities_by_id[entity.entity_id] = PersonIdentity(
+            entity_id=entity.entity_id, name=name
+        )
+        return EntityResolution(
             state=EntityResolutionState.EXACT,
             reason=EntityResolutionReason.EXACT_NORMALIZED_FULL_NAME,
             entity=entity,
         )
-        return resolution
+
+    def _resolve_candidates(self, candidates: tuple[EntityCandidate, ...]) -> EntityResolution:
+        """Decide over the complete candidate set, deduplicated by entity ID.
+
+        Evidence priority only selects a reason for the same entity. It never
+        breaks a tie between different identities or depends on producer order.
+        """
+        if any(candidate.entity_id not in self._entities_by_id for candidate in candidates):
+            raise ValueError("Candidate does not belong to this resolver.")
+        entity_ids = {candidate.entity_id for candidate in candidates}
+        if not entity_ids:
+            return EntityResolution(
+                state=EntityResolutionState.UNRESOLVED,
+                reason=EntityResolutionReason.NO_CANDIDATES,
+                entity=None,
+            )
+        if len(entity_ids) > 1:
+            return EntityResolution(
+                state=EntityResolutionState.AMBIGUOUS,
+                reason=EntityResolutionReason.AMBIGUOUS_CANDIDATES,
+                entity=None,
+            )
+        reason = next(
+            reason
+            for reason in _CANDIDATE_STATES
+            if any(candidate.reason is reason for candidate in candidates)
+        )
+        return EntityResolution(
+            state=_CANDIDATE_STATES[reason],
+            reason=reason,
+            entity=self._entities_by_id[next(iter(entity_ids))],
+        )
 
     def clear(self) -> None:
         """Discard all private entity values when the owning session closes."""
-        self._entities_by_normalized_full_name.clear()
+        self._entities_by_id.clear()
+        self._identities_by_id.clear()
