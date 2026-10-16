@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from re import Match, Pattern, compile
 from threading import RLock
 from types import TracebackType
@@ -48,7 +49,12 @@ class EntityDetector(Protocol):
 
 
 class TrustSession:
-    """An explicit TrustGate session with a private session-local token vault."""
+    """An explicit TrustGate session with private ephemeral token and alias state.
+
+    ``aliases`` optionally adds direct given-name relations, copied at creation
+    and cleared on close. Invalid configuration raises AliasValidationError
+    before a session-opened audit event is emitted.
+    """
 
     def __init__(
         self,
@@ -56,12 +62,14 @@ class TrustSession:
         detector: EntityDetector | None = None,
         policy: TrustPolicy | None = None,
         audit_sink: AuditSink | None = None,
+        aliases: Mapping[str, Sequence[str]] | None = None,
     ) -> None:
+        entity_resolver = EntityResolver(aliases=aliases)
         self._session_id = uuid4().hex
         self._closed = False
         self._lock = RLock()
         self._vault = TokenVault(session_id=self._session_id, registry=_PROCESS_TOKEN_REGISTRY)
-        self._entity_resolver = EntityResolver()
+        self._entity_resolver = entity_resolver
         self._detector = detector
         self._policy = policy
         self._audit_sink = audit_sink if audit_sink is not None else InMemoryAuditSink()

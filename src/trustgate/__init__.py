@@ -2,6 +2,7 @@
 
 from .audit import AuditSink, InMemoryAuditSink
 from .exceptions import (
+    AliasValidationError,
     CrossSessionTokenError,
     DataReleaseDenied,
     DetectionUnavailableError,
@@ -35,6 +36,7 @@ from .policy import decide_data_release
 from .session import TrustSession
 
 __all__ = [
+    "AliasValidationError",
     "AuditEvent",
     "AuditFailureReason",
     "AuditEventType",

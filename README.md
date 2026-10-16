@@ -81,8 +81,30 @@ and surname must match exactly. Titled surname-only mentions do not use aliases.
 Relations are directional and direct: sharing an alias does not make two full
 names equivalent, and reverse/transitive relations are not inferred. Exact,
 partial, and alias candidates are considered together; conflicting identities
-remain ambiguous even when one candidate is an exact match. Caller-provided
-session aliases are not implemented yet.
+remain ambiguous even when one candidate is an exact match.
+
+Add custom given-name relations when creating a session:
+
+```python
+with gate.session(aliases={"Liz": ["Elizabeth", "Eliza"], "Beth": ["Elizabeth"]}) as session:
+    safe_input = session.sanitize("Ask Elizabeth Taylor, then Liz Taylor.")
+    # Only send safe_input to the LLM.
+```
+
+`TrustSession(aliases=...)` accepts the same optional argument. Aliases are a
+mapping from one given-name component to a nonempty sequence of given-name
+components (for example, lists or tuples). Components use Unicode and case
+normalization; letters, combining marks, hyphens, and apostrophes are accepted.
+Empty names, titles, full names, and malformed structures raise
+`AliasValidationError` with a fixed, non-sensitive message before a session is
+opened. Normalized duplicate keys combine their targets.
+
+Custom relations add to the built-in table and use the same uniqueness,
+component-matching, and release-policy rules. The session copies the input;
+later edits to the caller's mapping or target lists have no effect. Custom
+relations remain process-local and in memory, are discarded on close, and are
+never stored on the gate, shared with other sessions, persisted, audited,
+logged, or sent to the LLM. `None` or an empty mapping keeps the built-in table.
 
 ## Language support and local model setup
 

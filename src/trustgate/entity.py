@@ -7,11 +7,14 @@ sink, log, exception, or LLM-facing return value.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Protocol
-from unicodedata import normalize
+from unicodedata import category, normalize
 from uuid import uuid4
+
+from .exceptions import AliasValidationError
 
 _SUPPORTED_PERSON_TITLES = frozenset({"dr", "mr", "mrs", "ms"})
 # Direct nickname -> given-name relations, not equivalence classes. Sharing a
@@ -235,6 +238,13 @@ class AliasResolver:
     the complete candidate set permits a merge.
     """
 
+    def __init__(self, *, aliases: Mapping[str, Sequence[str]] | None = None) -> None:
+        self._aliases = _BUILTIN_PERSON_ALIASES | _copy_person_aliases(aliases)
+
+    def clear(self) -> None:
+        """Discard the private session-local relation snapshot."""
+        self._aliases = frozenset()
+
     def candidates(
         self, *, name: PersonName, identities: tuple[PersonIdentity, ...]
     ) -> tuple[EntityCandidate, ...]:
@@ -247,9 +257,55 @@ class AliasResolver:
             )
             for identity in identities
             if len(identity.name.components) >= 2
-            and (name.components[0], identity.name.components[0]) in _BUILTIN_PERSON_ALIASES
+            and (name.components[0], identity.name.components[0]) in self._aliases
             and (len(name.components) == 1 or name.components[1:] == identity.name.components[1:])
         )
+
+
+def _copy_person_aliases(aliases: Mapping[str, Sequence[str]] | None) -> frozenset[tuple[str, str]]:
+    """Validate and copy aliases without retaining unsafe exception chains."""
+    try:
+        result = _normalize_person_aliases(aliases)
+    except Exception:
+        result = None
+    # Raise outside the handler: even __context__ must not expose input from a
+    # caller-owned Mapping/Sequence implementation that failed while reading.
+    if result is None:
+        raise AliasValidationError
+    return result
+
+
+def _normalize_person_aliases(
+    aliases: Mapping[str, Sequence[str]] | None,
+) -> frozenset[tuple[str, str]]:
+    if aliases is None:
+        return frozenset()
+    if not isinstance(aliases, Mapping):
+        raise AliasValidationError
+    relations: set[tuple[str, str]] = set()
+    for alias, targets in aliases.items():
+        normalized_alias = _normalize_alias_component(alias)
+        if isinstance(targets, str | bytes) or not isinstance(targets, Sequence) or not targets:
+            raise AliasValidationError
+        for target in targets:
+            relations.add((normalized_alias, _normalize_alias_component(target)))
+    return frozenset(relations)
+
+
+def _normalize_alias_component(value: str) -> str:
+    """Accept a single given-name component, retaining meaningful punctuation."""
+    if not isinstance(value, str):
+        raise AliasValidationError
+    name = PersonName.parse(value)
+    if name.title is not None or len(name.components) != 1:
+        raise AliasValidationError
+    component = name.components[0]
+    if not any(char.isalpha() for char in component) or any(
+        not (char.isalpha() or category(char).startswith("M") or char in "-'’")
+        for char in component
+    ):
+        raise AliasValidationError
+    return component
 
 
 @dataclass(frozen=True, slots=True)
@@ -359,13 +415,14 @@ class PersonMentionState:
 class EntityResolver:
     """Decide person identity conservatively within one session."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, aliases: Mapping[str, Sequence[str]] | None = None) -> None:
+        self._alias_resolver = AliasResolver(aliases=aliases)
         self._entities_by_id: dict[str, EntityRecord] = {}
         self._identities_by_id: dict[str, PersonIdentity] = {}
         self._candidate_producers: tuple[NameCandidateProducer, ...] = (
             ExactNameResolver(),
             PartialNameResolver(),
-            AliasResolver(),
+            self._alias_resolver,
         )
         self._unconfirmed_by_surface_form: dict[str, PersonResolution] = {}
         self._mention_states: list[PersonMentionState] = []
@@ -496,3 +553,4 @@ class EntityResolver:
         self._identities_by_id.clear()
         self._unconfirmed_by_surface_form.clear()
         self._mention_states.clear()
+        self._alias_resolver.clear()

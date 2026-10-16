@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import yaml
@@ -80,10 +81,16 @@ class TrustGate:
             raise PolicyValidationError
         return cls(policy=policy)
 
-    def session(self, *, principal: str | None = None) -> TrustSession:
+    def session(
+        self, *, principal: str | None = None, aliases: Mapping[str, Sequence[str]] | None = None
+    ) -> TrustSession:
         """Create a new explicit session.
 
         ``principal`` is accepted for the planned public API but is deliberately
         not retained by the Day 1 scaffold.
+
+        ``aliases`` adds direct given-name relations to this session's built-in
+        aliases. Inputs are validated and copied; neither this gate nor any
+        other session retains the caller's configuration.
         """
-        return TrustSession(policy=self._policy, audit_sink=self._audit_sink)
+        return TrustSession(policy=self._policy, audit_sink=self._audit_sink, aliases=aliases)

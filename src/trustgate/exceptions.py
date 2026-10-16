@@ -34,6 +34,12 @@ class ModelValidationError(TrustGateError):
     default_message = "TrustGate model input is invalid."
 
 
+class AliasValidationError(TrustGateError):
+    """Raised when session-local alias configuration is malformed."""
+
+    default_message = "The session alias configuration is invalid."
+
+
 class PolicyValidationError(PolicyError):
     """Raised when a policy cannot be parsed or validated."""
 
