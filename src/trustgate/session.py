@@ -195,16 +195,17 @@ class TrustSession:
             raise SessionClosedError
 
     def _detect(self, text: str) -> tuple[SensitiveEntity, ...]:
-        detector = self._detector
-        if detector is None:
-            detector = PresidioDetector()
-            self._detector = detector
         try:
+            detector = self._detector
+            if detector is None:
+                detector = PresidioDetector()
+                self._detector = detector
             return detector.detect(text)
-        except DetectionUnavailableError:
-            raise
         except Exception:
-            raise DetectionUnavailableError from None
+            pass
+        # A suppressed context is still reachable via __context__. Raise only
+        # after leaving the handler so detector exceptions cannot expose text.
+        raise DetectionUnavailableError
 
     def _sanitize_text(self, text: str) -> tuple[str, tuple[SensitiveToken, ...]]:
         entities = self._detect(text)

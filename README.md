@@ -19,7 +19,7 @@ TrustGate is pre-alpha. The current implementation provides:
 - Session cleanup and cross-session token isolation.
 - Conservative session-local person resolution for normalized full names and
   uniquely matching first names, title-plus-surname mentions, and built-in
-  given-name aliases.
+  given-name aliases plus caller-provided session-local additions.
 
 `rehydrate_for_user()` is intentionally not implemented. TrustGate also remains
 framework-independent and has no persistent audit or vault storage.
@@ -27,6 +27,8 @@ framework-independent and has no persistent audit or vault storage.
 ## Usage: LLM and tool boundaries
 
 ```python
+import re
+
 from trustgate import ToolCall, TrustGate
 
 gate = TrustGate.from_yaml("examples/sample-policy.yaml")
@@ -36,9 +38,12 @@ with gate.session() as session:
     # Send only safe_input to the LLM.
 
     # The LLM returns tokenized arguments it has seen, never raw values.
+    account_token = re.search(r"\[ACCOUNT_NUMBER_[1-9][0-9]*\]", safe_input)
+    if account_token is None:
+        raise RuntimeError("The expected account token was not detected.")
     tool_call = ToolCall(
         name="get_account",
-        arguments={"account": "[ACCOUNT_NUMBER_1]"},
+        arguments={"account": account_token.group()},
     )
     tool_arguments = session.rehydrate_for_tool(tool_call)
     # Send tool_arguments only to the trusted tool runtime, never to the LLM.
@@ -52,6 +57,8 @@ The LLM-visible result contains tokens such as `[ACCOUNT_NUMBER_1]` and
 `[PERSON_1]`, rather than the detected raw values. Token mappings are
 process-local, in-memory, scoped to one `TrustSession`, and discarded when that
 session closes. A token from another active session fails closed.
+Token sequence numbers are process-wide; use tokens from sanitized output
+rather than assuming that a new session starts at `_1`.
 
 `rehydrate_for_tool()` traverses nested JSON-like arguments without mutating the
 `ToolCall`. Every token must belong to the current session and have an explicit
@@ -106,9 +113,22 @@ relations remain process-local and in memory, are discarded on close, and are
 never stored on the gate, shared with other sessions, persisted, audited,
 logged, or sent to the LLM. `None` or an empty mapping keeps the built-in table.
 
+Resolution applies only to spans detected as `PERSON`. The detector preserves
+an immediately preceding supported title (`Mr`, `Mrs`, `Ms`, or `Dr`, optionally
+with a period), so a detected surname can reach the resolver as `Mr Smith`.
+Alias configuration does not register new detector patterns or guarantee that
+spaCy recognizes every spelling or mention. Undetected text remains unchanged;
+applications must verify detection coverage for their data. A custom local
+`EntityDetector` can be passed to `TrustSession(detector=...)` for known formats.
+
+Ambiguous tokens retain the original detected surface as their canonical value,
+not an arbitrarily chosen full name. If policy allows release, that original
+surface can still reach the trusted tool. Resolution is not identity verification
+or action authorization. See [the scope document](docs/v0.1-scope.md).
+
 ## Language support and local model setup
 
-Day 2 supports English (`en`) detection using Presidio and an explicitly loaded
+TrustGate supports English (`en`) detection using Presidio and an explicitly loaded
 local `en_core_web_sm` spaCy model. TrustGate never downloads a model while
 sanitizing: if the model is unavailable, detection fails closed.
 
@@ -178,3 +198,16 @@ Python 3.11 or later is required.
 python -m pytest
 python -m ruff check .
 ```
+
+The Day 5 whole-flow regressions run with the installed local spaCy model:
+
+```bash
+python -m pytest tests/test_person_boundary_flow.py tests/test_detection.py
+```
+
+They exercise sanitized input -> mock LLM -> policy-controlled read/write tool
+arguments -> copied, sanitized nested results -> follow-up -> session closure,
+including custom aliases, ambiguous identities, denied destinations, and
+cross-session replay. Candidate and session tests use controlled detector spans
+to verify resolution rules independently of NER accuracy. Optional transcript
+logging and a standalone demonstration remain later work.
