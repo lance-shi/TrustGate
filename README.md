@@ -16,6 +16,8 @@ TrustGate is pre-alpha. The current implementation provides:
 - Policy-controlled recursive tool-argument rehydration.
 - Recursive tool-result sanitization before values become LLM-visible.
 - Process-local, in-memory audit events containing only safe metadata.
+- Typed per-occurrence resolution reasons and a default-off sanitized transcript.
+- A runnable local mock LLM/tool example using the real detector.
 - Session cleanup and cross-session token isolation.
 - Conservative session-local person resolution for normalized full names and
   uniquely matching first names, title-plus-surname mentions, and built-in
@@ -23,6 +25,10 @@ TrustGate is pre-alpha. The current implementation provides:
 
 `rehydrate_for_user()` is intentionally not implemented. TrustGate also remains
 framework-independent and has no persistent audit or vault storage.
+
+Day 6 implementation and acceptance are recorded in the
+[acceptance report](docs/day6-acceptance.md). Independent adversarial review and
+release validation remain Day 7 work; the package is still pre-alpha.
 
 ## Usage: LLM and tool boundaries
 
@@ -161,7 +167,8 @@ data_policies:
 Missing, unreadable, malformed, or structurally invalid policy documents fail
 closed. Missing entity types and destinations also deny by default. See
 [`examples/sample-policy.yaml`](examples/sample-policy.yaml) for the complete
-example.
+example. The [policy reference](docs/data-release-policy.md) documents schema
+validation, the sample's decision matrix, and token-free argument behavior.
 
 ## Tool-result sanitization and auditing
 
@@ -277,8 +284,8 @@ explicit policy allowance, the trusted mock tool receives raw arguments; its
 nested result is sanitized before becoming LLM-visible. Both read and write
 destinations use the same release path; the write is only an in-memory simulation.
 
-The JSON report shows tokenized input/calls/results, mock replies, a stable follow-up token,
-an ambiguous alias with its own token, a denied release, cross-session replay
+The JSON report shows tokenized input/calls/results, mock replies, a stable
+follow-up token, an ambiguous alias with its own token, a denied release, cross-session replay
 rejection, and rejection after session close. It also includes the optional
 sanitized transcript and a compact audit summary. Tokens come from actual
 sanitized output; their numbers may differ between runs.
@@ -332,3 +339,8 @@ including custom aliases, ambiguous identities, denied destinations, and
 cross-session replay. Candidate and session tests use controlled detector spans
 to verify resolution rules independently of NER accuracy. Optional sanitized
 transcript collection and the runnable example above are implemented.
+
+The Day 6 acceptance commands and environment notes are recorded in the
+[acceptance report](docs/day6-acceptance.md). The
+[baseline and coverage checklist](docs/day6-baseline.md) preserves the
+pre-change baseline and the evidence for each implementation step.

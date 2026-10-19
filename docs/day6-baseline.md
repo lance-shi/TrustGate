@@ -5,7 +5,8 @@ Starting commit: `ef87d21` (`Finalise steps and update readme`).
 The tracked working tree was clean at the start of this check.
 
 This is a test inventory, not a line-coverage measurement or a release audit.
-Items marked pending are planned work, not currently passing guarantees.
+The initial coverage table preserves pre-Day 6 gaps; the implementation checklist
+below records their subsequent completion and verified results.
 
 ## Verified baseline
 
@@ -57,7 +58,7 @@ Local execution issues and resolution:
 
 Paths in the following table are relative to `tests/`.
 
-| Area | Existing evidence | Remaining Day 6 work |
+| Area | Existing evidence | Day 6 work identified at baseline |
 | --- | --- | --- |
 | In-memory auditing | `test_audit.py`: allowed release metadata, opaque destination, no release event for token-free calls, custom falsy sink | Add resolution state/reason metadata and test the resulting serialized events |
 | Audit serialization and leakage assertions | `test_security_constraints.py`: event serialization, nested disclosure detection, exception-context inspection; `security_assertions.py` serializes Pydantic models | Exercise new diagnostic fields and collected events, including normalized names and custom aliases |
@@ -139,7 +140,7 @@ exclusion, invalid/cross-session tokens, independent alias/session state, uncert
 and ambiguous identities, failure without partial records, close semantics, empty
 content, invalid switches, and the real local detector. Resolver failure injection
 here verifies absence of transcript entries and cleanup; arbitrary resolver error
-disclosure hardening remains Step 4 work.
+disclosure hardening was completed subsequently in Step 4 below.
 
 Step 3 verification: focused transcript/public API/audit tests 87 passed; complete
 suite 423 passed in 4.57 seconds; Ruff passed. No tests were skipped.
@@ -218,11 +219,18 @@ addition; the final full suite, including all 8 updated example cases, passed
 498 tests in 8.74 seconds. The final direct script invocation exited 0 with only
 the safe JSON report. Ruff and example/test formatting checks passed.
 
-### Step 6: documentation and final checks
+### Step 6: documentation and final checks — complete on 2026-10-19
 
-- [ ] Update README and policy guidance for implemented diagnostics and the demo.
-- [ ] Keep detection limits, conservative resolution, and data-release boundaries explicit.
-- [ ] Run focused tests, the full suite, Ruff, and the runnable demo.
+- [x] Update README and policy guidance for implemented diagnostics and the demo.
+- [x] Keep detection limits, conservative resolution, and data-release boundaries explicit.
+- [x] Run focused tests, the full suite, Ruff, and the runnable demo.
+
+See the [final acceptance report](day6-acceptance.md) for the complete outcome and
+reproduction commands. Focused tests: 169 passed; full suite: 498 passed; Ruff:
+passed; direct example: exit 0 with a safe JSON report. Three README Python
+snippets executed, three YAML snippets validated, and local documentation links
+checked. Existing sample-policy permissions are unchanged. All six Day 6 slices
+are complete; independent adversarial review and release checks remain Day 7 work.
 
 No runtime behavior or public API changes are part of Step 1. User-response
 rehydration, persistent storage, framework integrations, and Day 7 release checks

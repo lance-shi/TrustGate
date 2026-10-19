@@ -2,6 +2,9 @@
 #
 # Rules not stated here are denied. The policy never permits raw sensitive data
 # to be sent to an LLM: detected values are always tokenized before that boundary.
+# See docs/data-release-policy.md for the schema and the decision matrix.
+# Rules govern release to exact destination names, never permission to execute.
+# Adding a type here does not add detection coverage or extend the local model.
 version: 1
 
 data_policies:

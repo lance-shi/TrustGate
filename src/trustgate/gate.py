@@ -90,8 +90,8 @@ class TrustGate:
     ) -> TrustSession:
         """Create a new explicit session.
 
-        ``principal`` is accepted for the planned public API but is deliberately
-        not retained by the Day 1 scaffold.
+        ``principal`` is currently ignored and not retained. It does not enable
+        identity, permission, or action-authorization checks.
 
         ``aliases`` adds direct given-name relations to this session's built-in
         aliases. Inputs are validated and copied; neither this gate nor any

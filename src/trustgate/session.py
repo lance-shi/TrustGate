@@ -230,7 +230,7 @@ class TrustSession:
             return sanitized
 
     def rehydrate_for_user(self, text: str) -> str:
-        """Restore a tokenized response for its user after vault support is implemented."""
+        """Raise FeatureUnavailableError; user-response rehydration is not implemented."""
         with self._lock:
             self._ensure_open()
             raise FeatureUnavailableError
