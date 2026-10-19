@@ -17,6 +17,7 @@ from .exceptions import (
     DetectionUnavailableError,
     FeatureUnavailableError,
     MalformedTokenError,
+    ModelValidationError,
     SessionClosedError,
     TokenResolutionError,
     ToolResultSanitizationError,
@@ -33,9 +34,12 @@ from .models import (
     SensitiveEntity,
     SensitiveToken,
     ToolCall,
+    TranscriptEntry,
+    TranscriptEntryType,
     TrustPolicy,
 )
 from .policy import decide_data_release
+from .transcript import _SanitizedTranscript
 from .vault import TokenRegistry, TokenVault
 
 _PROCESS_TOKEN_REGISTRY = TokenRegistry()
@@ -55,6 +59,9 @@ class TrustSession:
     ``aliases`` optionally adds direct given-name relations, copied at creation
     and cleared on close. Invalid configuration raises AliasValidationError
     before a session-opened audit event is emitted.
+
+    ``transcript=True`` opts into in-memory copies of completed sanitization
+    outputs. Collection is disabled by default; safe snapshots survive close.
     """
 
     def __init__(
@@ -64,7 +71,10 @@ class TrustSession:
         policy: TrustPolicy | None = None,
         audit_sink: AuditSink | None = None,
         aliases: Mapping[str, Sequence[str]] | None = None,
+        transcript: bool = False,
     ) -> None:
+        if not isinstance(transcript, bool):
+            raise ModelValidationError
         entity_resolver = EntityResolver(aliases=aliases)
         self._session_id = uuid4().hex
         self._closed = False
@@ -74,7 +84,18 @@ class TrustSession:
         self._detector = detector
         self._policy = policy
         self._audit_sink = audit_sink if audit_sink is not None else InMemoryAuditSink()
+        self._transcript = _SanitizedTranscript() if transcript else None
         self._record_audit(AuditEventType.SESSION_OPENED)
+
+    @property
+    def transcript(self) -> tuple[TranscriptEntry, ...]:
+        """Return an isolated safe-output snapshot, including after close.
+
+        Collection is disabled by default. This never reads private mappings;
+        nested content in the returned snapshot can be edited independently.
+        """
+        with self._lock:
+            return self._transcript._snapshot() if self._transcript is not None else ()
 
     @property
     def session_id(self) -> str:
@@ -125,6 +146,8 @@ class TrustSession:
             self._record_audit(
                 AuditEventType.VALUE_SANITIZED, tokens=tokens, resolutions=tuple(resolutions)
             )
+            if self._transcript is not None:
+                self._transcript._record(TranscriptEntryType.INPUT_SANITIZED, sanitized)
             return sanitized
 
     def rehydrate_for_tool(self, tool_call: ToolCall) -> dict[str, JsonValue]:
@@ -195,6 +218,8 @@ class TrustSession:
                 tokens=tuple(tokens),
                 resolutions=tuple(resolutions),
             )
+            if self._transcript is not None:
+                self._transcript._record(TranscriptEntryType.TOOL_RESULT_SANITIZED, sanitized)
             return sanitized
 
     def rehydrate_for_user(self, text: str) -> str:

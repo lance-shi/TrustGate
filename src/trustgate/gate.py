@@ -82,7 +82,11 @@ class TrustGate:
         return cls(policy=policy)
 
     def session(
-        self, *, principal: str | None = None, aliases: Mapping[str, Sequence[str]] | None = None
+        self,
+        *,
+        principal: str | None = None,
+        aliases: Mapping[str, Sequence[str]] | None = None,
+        transcript: bool = False,
     ) -> TrustSession:
         """Create a new explicit session.
 
@@ -92,5 +96,10 @@ class TrustGate:
         ``aliases`` adds direct given-name relations to this session's built-in
         aliases. Inputs are validated and copied; neither this gate nor any
         other session retains the caller's configuration.
+
+        ``transcript=True`` collects completed sanitized inputs and tool results
+        in this session's memory. The default collects no transcript content.
         """
-        return TrustSession(policy=self._policy, audit_sink=self._audit_sink, aliases=aliases)
+        return TrustSession(
+            policy=self._policy, audit_sink=self._audit_sink, aliases=aliases, transcript=transcript
+        )

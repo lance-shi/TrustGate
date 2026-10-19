@@ -109,15 +109,40 @@ Step 2 verification: initial focused set 53 passed; final full suite 379 passed
 in 4.33 seconds, including the subsequently added same-text occurrence test;
 Ruff passed. The original 339-test baseline above remains the pre-change record.
 
-### Step 3: optional sanitized transcript
+### Step 3: optional sanitized transcript — complete on 2026-10-19
 
-- [ ] Define an in-memory, explicitly enabled, default-off interface.
-- [ ] Collect only content after the relevant sanitization boundary succeeds.
-- [ ] Exclude raw inputs/results, rehydrated tool arguments, aliases, and vault state.
-- [ ] Test default-off behavior, safe serialization, snapshot isolation, session
+- [x] Define an in-memory, explicitly enabled, default-off interface.
+- [x] Collect only content after the relevant sanitization boundary succeeds.
+- [x] Exclude raw inputs/results, rehydrated tool arguments, aliases, and vault state.
+- [x] Test default-off behavior, safe serialization, snapshot isolation, session
       isolation, and failure without a partially recorded unsafe entry.
-- [ ] Document detection coverage limits; copying a value into a transcript does
+- [x] Document detection coverage limits; copying a value into a transcript does
       not establish that the value was sanitized.
+
+`gate.session(transcript=True)` and `TrustSession(transcript=True)` enable a
+private, session-owned in-memory collector. `session.transcript` returns a tuple
+of typed `TranscriptEntry` deep-copy snapshots containing only a fixed kind and
+completed sanitization output. Collection occurs after successful audit recording;
+there are no entries for failed operations, tool arguments, or LLM responses.
+There is no public append interface or external sink. Disabled sessions have no
+collector. Only boolean creation-time switches are accepted.
+
+Safe history remains readable after close, independently of cleared mappings and
+resolver state. Snapshot and returned-result mutation cannot alter stored history.
+No additional detection, resolution, or release decisions are made by collection.
+Undetected text remains unchanged; README explicitly documents this content-logging
+limit and that entry construction alone does not sanitize data.
+
+`tests/test_transcript.py` adds 44 cases covering both creation APIs, default-off
+and explicit opt-in, safe serialization, deep-copy isolation, read/write release
+exclusion, invalid/cross-session tokens, independent alias/session state, uncertain
+and ambiguous identities, failure without partial records, close semantics, empty
+content, invalid switches, and the real local detector. Resolver failure injection
+here verifies absence of transcript entries and cleanup; arbitrary resolver error
+disclosure hardening remains Step 4 work.
+
+Step 3 verification: focused transcript/public API/audit tests 87 passed; complete
+suite 423 passed in 4.57 seconds; Ruff passed. No tests were skipped.
 
 ### Step 4: failure and boundary regressions
 

@@ -208,6 +208,20 @@ class ToolCall(SafePublicModel):
     arguments: dict[str, JsonValue] = Field(default_factory=dict)
 
 
+class TranscriptEntryType(StrEnum):
+    """Completed boundary operations eligible for transcript collection."""
+
+    INPUT_SANITIZED = "input_sanitized"
+    TOOL_RESULT_SANITIZED = "tool_result_sanitized"
+
+
+class TranscriptEntry(SafePublicModel):
+    """A snapshot of a completed sanitization output, not proof of detection."""
+
+    kind: TranscriptEntryType
+    content: JsonValue = Field(repr=False)
+
+
 class AuditResolution(SafePublicModel):
     """One person occurrence's safe evidence, without name or candidate data."""
 

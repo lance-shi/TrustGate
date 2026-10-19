@@ -13,6 +13,8 @@ def test_public_api_exports_the_core_types() -> None:
         "DataReleaseDecision",
         "AuditEvent",
         "AuditResolution",
+        "TranscriptEntry",
+        "TranscriptEntryType",
         "EntityResolutionState",
         "EntityResolutionReason",
         "TrustGateError",

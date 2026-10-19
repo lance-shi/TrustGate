@@ -32,6 +32,8 @@ from .models import (
     SensitiveEntity,
     SensitiveToken,
     ToolCall,
+    TranscriptEntry,
+    TranscriptEntryType,
     TrustPolicy,
 )
 from .policy import decide_data_release
@@ -67,6 +69,8 @@ __all__ = [
     "TokenResolutionError",
     "ToolResultSanitizationError",
     "ToolCall",
+    "TranscriptEntry",
+    "TranscriptEntryType",
     "TrustGate",
     "TrustGateError",
     "TrustPolicy",

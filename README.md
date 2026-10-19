@@ -193,6 +193,50 @@ result or data release. Audit snapshots remain readable after session close.
 The typed `AuditResolution` model rejects unknown fields, invalid identifiers,
 and inconsistent state/reason combinations with a non-sensitive exception.
 
+## Optional sanitized transcript
+
+Transcript collection is disabled by default. Enable it for an individual
+session with `gate.session(transcript=True)` or `TrustSession(transcript=True)`:
+
+```python
+gate = TrustGate.from_yaml("examples/sample-policy.yaml")
+with gate.session(transcript=True) as session:
+    safe_input = session.sanitize("Check account 12345678 for Jane Smith.")
+    safe_result = session.sanitize_tool_result({"owner": "Jane Smith"})
+
+# Independent typed snapshots remain readable after the session closes.
+entries = session.transcript
+for entry in entries:
+    print(entry.model_dump_json())
+```
+
+`session.transcript` returns a tuple of `TranscriptEntry` snapshots, each with
+`kind` (`input_sanitized` or `tool_result_sanitized`) and `content`. Entries are
+appended only after the entire corresponding operation and its audit recording
+succeed. Failed operations add no entry, including when some nested items were
+already processed. Disabled sessions allocate no transcript collector and return
+an empty tuple. Only a boolean is accepted for the creation-time switch.
+
+Collection is automatic at those two boundaries. There is no public append
+method, file output, logging handler, or external transcript sink. Tool calls
+are not collected: neither caller-supplied call names/arguments nor the raw
+arguments returned by `rehydrate_for_tool()` enter this history. LLM responses
+are not automatically collected either; this is a history of completed
+sanitization outputs, not a complete conversation recorder.
+
+The collector never reads aliases, normalized names, or vault mappings. It owns
+copies of sanitized outputs, and each read returns another independent deep
+copy, so editing a result or a snapshot cannot modify the stored history.
+Histories belong to one session and remain in memory while that session object
+is retained. Closing the session clears raw mappings and resolution state while
+preserving the transcript; previously obtained snapshots remain caller-owned.
+
+Transcript safety depends on detection coverage, just like the sanitization
+return values: undetected sensitive text remains unchanged and can therefore
+appear in this opt-in history. `TranscriptEntry` validates structure, not
+sensitivity; constructing one directly does not sanitize its content. Verify
+the local detector's coverage for your data before enabling content collection.
+
 ## Workflow
 
 ```text
@@ -226,5 +270,6 @@ They exercise sanitized input -> mock LLM -> policy-controlled read/write tool
 arguments -> copied, sanitized nested results -> follow-up -> session closure,
 including custom aliases, ambiguous identities, denied destinations, and
 cross-session replay. Candidate and session tests use controlled detector spans
-to verify resolution rules independently of NER accuracy. Optional transcript
-logging and a standalone demonstration remain later work.
+to verify resolution rules independently of NER accuracy. Optional sanitized
+transcript collection is now implemented; a standalone demonstration remains
+later work.
