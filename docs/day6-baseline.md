@@ -144,17 +144,45 @@ disclosure hardening remains Step 4 work.
 Step 3 verification: focused transcript/public API/audit tests 87 passed; complete
 suite 423 passed in 4.57 seconds; Ruff passed. No tests were skipped.
 
-### Step 4: failure and boundary regressions
+### Step 4: failure and boundary regressions — complete on 2026-10-19
 
-- [ ] Inject resolver failures during input and nested result sanitization,
+- [x] Inject resolver failures during input and nested result sanitization,
       including failure after prior items created session state.
-- [ ] Assert safe exception arguments/chains and no raw audit/log/transcript output.
-- [ ] Assert no partially processed result is returned and caller data is unchanged.
-- [ ] Verify context-manager exit clears vault, entity, mention, and alias state.
+- [x] Assert safe exception arguments/chains and no raw audit/log/transcript output.
+- [x] Assert no partially processed result is returned and caller data is unchanged.
+- [x] Verify context-manager exit clears vault, entity, mention, and alias state.
       Do not assume that a failed method automatically closes an explicitly managed session.
-- [ ] Add missing empty-content and deterministic span-conflict cases.
-- [ ] Preserve duplicate token reuse, identity separation, policy enforcement,
+- [x] Add missing empty-content and deterministic span-conflict cases.
+- [x] Preserve duplicate token reuse, identity separation, policy enforcement,
       cross-session rejection, and closed-session rejection with diagnostics enabled.
+
+Fault injection reproduced raw resolver exception propagation before the fix.
+Resolver exceptions now become a fixed public `EntityResolutionError`, raised
+outside the original handler to drop both cause and context. Tool-result failure
+events use `entity_resolution_unavailable`. Invalid detector return values are
+validated inside the existing safe detection boundary; a `None` result can no
+longer be interpreted as an empty detection result.
+
+Unexpected tool-result traversal exceptions now become fixed
+`ToolResultSanitizationError` events with `unsafe_result_structure`. An active
+container-path set detects cycles before recursion exhaustion and permits shared
+containers in independent branches. Ordinary JSON traversal and caller ownership
+are preserved. No rollback or automatic session closure was introduced; `with`
+exit or explicit `close()` clears all private mappings and resolver state.
+
+`tests/test_boundary_failures.py` adds 35 cases for resolver errors before/after
+registration, input/nested values/nested keys, first-item/later-item failures,
+both transcript modes, raw exception chains, malformed detector output, custom
+container iteration errors, cycles, token ownership revocation, and explicit
+session lifecycle. `tests/test_boundary_spans.py` adds 31 cases for span type/length
+ties, containment, chained overlap, duplicate spans, detector-order permutations,
+empty results, shared containers, stable tokens, allowed reads/writes, default
+deny, and cross-session rejection. The static exception test now also covers the
+new public error, for 67 additional test cases compared with Step 3.
+
+Step 4 verification: focused boundary/transcript/audit set 150 passed; full suite
+490 passed in 4.89 seconds; Ruff passed. No tests were skipped. README documents
+the safe failure categories and the explicit cleanup contract.
 
 ### Step 5: runnable example
 

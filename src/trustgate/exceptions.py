@@ -22,6 +22,12 @@ class DetectionUnavailableError(TrustGateError):
     default_message = "The local sensitive-data detector is unavailable."
 
 
+class EntityResolutionError(TrustGateError):
+    """Raised when local entity resolution cannot complete safely."""
+
+    default_message = "The local entity resolver is unavailable."
+
+
 class PolicyError(TrustGateError):
     """Base exception for invalid or unavailable data-release policy."""
 

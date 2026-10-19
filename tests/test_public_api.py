@@ -17,6 +17,7 @@ def test_public_api_exports_the_core_types() -> None:
         "TranscriptEntryType",
         "EntityResolutionState",
         "EntityResolutionReason",
+        "EntityResolutionError",
         "TrustGateError",
         "DataReleaseDenied",
         "SessionClosedError",

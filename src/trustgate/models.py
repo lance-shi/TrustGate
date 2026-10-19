@@ -165,6 +165,7 @@ class AuditFailureReason(StrEnum):
     """Safe categories for tool-result sanitization failures."""
 
     DETECTION_UNAVAILABLE = "detection_unavailable"
+    ENTITY_RESOLUTION_UNAVAILABLE = "entity_resolution_unavailable"
     UNSAFE_RESULT_STRUCTURE = "unsafe_result_structure"
 
 

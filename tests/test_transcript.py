@@ -9,6 +9,7 @@ from trustgate import (
     CrossSessionTokenError,
     DataReleaseDenied,
     DetectionUnavailableError,
+    EntityResolutionError,
     InMemoryAuditSink,
     ModelValidationError,
     SensitiveEntity,
@@ -206,7 +207,9 @@ def test_ambiguity_and_stable_uncertain_identity_are_preserved():
 @pytest.mark.parametrize("failure", ["input", "result", "collision", "unsupported", "resolver"])
 def test_failure_never_records_partial_content_and_context_exit_clears_mappings(failure, caplog):
     session = _session()
-    with pytest.raises((DetectionUnavailableError, ToolResultSanitizationError, ValueError)):
+    with pytest.raises(
+        (DetectionUnavailableError, ToolResultSanitizationError, EntityResolutionError)
+    ):
         with session:
             session.sanitize("previous safe message")
             before = session.transcript

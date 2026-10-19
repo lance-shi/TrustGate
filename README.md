@@ -193,6 +193,23 @@ result or data release. Audit snapshots remain readable after session close.
 The typed `AuditResolution` model rejects unknown fields, invalid identifiers,
 and inconsistent state/reason combinations with a non-sensitive exception.
 
+Local resolver failures raise a fixed `EntityResolutionError`, without the
+original exception message, cause, or context. Failed tool-result events identify
+this as `entity_resolution_unavailable`. Invalid detector output (including
+`None` instead of a tuple of `SensitiveEntity` spans) raises
+`DetectionUnavailableError`. Cyclic results and unexpected container iteration
+errors raise `ToolResultSanitizationError` with `unsafe_result_structure` audit
+metadata. Reusing a container in different branches is supported and produces
+independent sanitized copies.
+
+Failed sanitization returns no partial result and adds no transcript entry.
+Session state created before failure remains private until the session closes;
+failure does not automatically close an explicitly managed session or undo
+earlier state. Use a context manager, or close the session in `finally`, to
+discard vault mappings, entity/mention state, aliases, and token ownership
+metadata even when an operation fails. Audit and transcript snapshots remain
+readable after closure.
+
 ## Optional sanitized transcript
 
 Transcript collection is disabled by default. Enable it for an individual

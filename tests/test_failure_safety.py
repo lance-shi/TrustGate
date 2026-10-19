@@ -6,6 +6,7 @@ from security_assertions import assert_no_raw_sensitive_values
 from trustgate import (
     CrossSessionTokenError,
     DataReleaseDenied,
+    EntityResolutionError,
     MalformedTokenError,
     ModelValidationError,
     PolicyError,
@@ -109,6 +110,7 @@ def test_policy_loading_failure_is_safe_for_a_sensitive_path() -> None:
         PolicyError,
         PolicyValidationError,
         DataReleaseDenied,
+        EntityResolutionError,
         UnknownTokenError,
         CrossSessionTokenError,
         MalformedTokenError,

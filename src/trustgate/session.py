@@ -15,12 +15,14 @@ from .entity import EntityResolver
 from .exceptions import (
     DataReleaseDenied,
     DetectionUnavailableError,
+    EntityResolutionError,
     FeatureUnavailableError,
     MalformedTokenError,
     ModelValidationError,
     SessionClosedError,
     TokenResolutionError,
     ToolResultSanitizationError,
+    TrustGateError,
 )
 from .models import (
     AuditEvent,
@@ -193,26 +195,31 @@ class TrustSession:
             self._ensure_open()
             tokens: list[SensitiveToken] = []
             resolutions: list[AuditResolution] = []
+            failure: TrustGateError | None = None
+            failure_reason = AuditFailureReason.UNSAFE_RESULT_STRUCTURE
             try:
                 sanitized = self._sanitize_result_value(
-                    value=result, tokens=tokens, resolutions=resolutions
+                    value=result, tokens=tokens, resolutions=resolutions, active_containers=set()
                 )
             except DetectionUnavailableError:
+                failure = DetectionUnavailableError()
+                failure_reason = AuditFailureReason.DETECTION_UNAVAILABLE
+            except EntityResolutionError:
+                failure = EntityResolutionError()
+                failure_reason = AuditFailureReason.ENTITY_RESOLUTION_UNAVAILABLE
+            except Exception:
+                # Includes malformed/cyclic structures and caller-defined container
+                # iteration errors. Never propagate their messages or chains.
+                failure = ToolResultSanitizationError()
+            if failure is not None:
                 self._record_audit(
                     AuditEventType.TOOL_RESULT_SANITIZATION_FAILED,
-                    failure_reason=AuditFailureReason.DETECTION_UNAVAILABLE,
+                    failure_reason=failure_reason,
                     tokens=tuple(tokens),
                     resolutions=tuple(resolutions),
                 )
-                raise
-            except ToolResultSanitizationError:
-                self._record_audit(
-                    AuditEventType.TOOL_RESULT_SANITIZATION_FAILED,
-                    failure_reason=AuditFailureReason.UNSAFE_RESULT_STRUCTURE,
-                    tokens=tuple(tokens),
-                    resolutions=tuple(resolutions),
-                )
-                raise
+                # Outside the handler so even __context__ cannot disclose input.
+                raise failure
             self._record_audit(
                 AuditEventType.TOOL_RESULT_SANITIZED,
                 tokens=tuple(tokens),
@@ -238,7 +245,9 @@ class TrustSession:
             if detector is None:
                 detector = PresidioDetector()
                 self._detector = detector
-            return detector.detect(text)
+            entities = detector.detect(text)
+            _validate_entity_ranges(entities, text_length=len(text))
+            return entities
         except Exception:
             pass
         # A suppressed context is still reachable via __context__. Raise only
@@ -249,7 +258,6 @@ class TrustSession:
         self, text: str, *, resolutions: list[AuditResolution]
     ) -> tuple[str, tuple[SensitiveToken, ...]]:
         entities = self._detect(text)
-        _validate_entity_ranges(entities, text_length=len(text))
         tokens: list[SensitiveToken] = []
         replacements: list[tuple[SensitiveEntity, SensitiveToken]] = []
         for entity in _merge_overlapping_entities(entities):
@@ -264,7 +272,7 @@ class TrustSession:
 
         sanitized = text
         for entity, token in reversed(replacements):
-            sanitized = f"{sanitized[:entity.start]}{token.value}{sanitized[entity.end:]}"
+            sanitized = f"{sanitized[: entity.start]}{token.value}{sanitized[entity.end :]}"
         return sanitized, tuple(tokens)
 
     def _tokenize_entity(
@@ -275,11 +283,17 @@ class TrustSession:
         resolutions: list[AuditResolution],
     ) -> SensitiveToken:
         if entity.entity_type == "PERSON":
-            result = self._entity_resolver.resolve_person(
-                surface_form=raw_value,
-                start=entity.start,
-                end=entity.end,
-            )
+            try:
+                result = self._entity_resolver.resolve_person(
+                    surface_form=raw_value,
+                    start=entity.start,
+                    end=entity.end,
+                )
+            except Exception:
+                result = None
+            if result is None:
+                # A suppressed exception would still retain its raw context.
+                raise EntityResolutionError
             resolved_entity = result.token_entity
             token = self._vault.store(
                 value=resolved_entity.canonical_value,
@@ -302,6 +316,7 @@ class TrustSession:
         value: object,
         tokens: list[SensitiveToken],
         resolutions: list[AuditResolution],
+        active_containers: set[int],
     ) -> JsonValue:
         if isinstance(value, str):
             sanitized, detected_tokens = self._sanitize_text(value, resolutions=resolutions)
@@ -309,12 +324,23 @@ class TrustSession:
             return sanitized
         if value is None or isinstance(value, bool | int | float):
             return value
-        if isinstance(value, list):
-            return [
-                self._sanitize_result_value(value=item, tokens=tokens, resolutions=resolutions)
-                for item in value
-            ]
-        if isinstance(value, dict):
+        if not isinstance(value, list | dict):
+            raise ToolResultSanitizationError
+        container_id = id(value)
+        if container_id in active_containers:
+            raise ToolResultSanitizationError
+        active_containers.add(container_id)
+        try:
+            if isinstance(value, list):
+                return [
+                    self._sanitize_result_value(
+                        value=item,
+                        tokens=tokens,
+                        resolutions=resolutions,
+                        active_containers=active_containers,
+                    )
+                    for item in value
+                ]
             sanitized: dict[str, JsonValue] = {}
             for key, item in value.items():
                 if not isinstance(key, str):
@@ -324,10 +350,14 @@ class TrustSession:
                 if sanitized_key in sanitized:
                     raise ToolResultSanitizationError
                 sanitized[sanitized_key] = self._sanitize_result_value(
-                    value=item, tokens=tokens, resolutions=resolutions
+                    value=item,
+                    tokens=tokens,
+                    resolutions=resolutions,
+                    active_containers=active_containers,
                 )
             return sanitized
-        raise ToolResultSanitizationError
+        finally:
+            active_containers.remove(container_id)
 
     def _rehydrate_value(
         self,
@@ -379,7 +409,7 @@ class TrustSession:
 
         rehydrated = text
         for match, raw_value in reversed(replacements):
-            rehydrated = f"{rehydrated[:match.start()]}{raw_value}{rehydrated[match.end():]}"
+            rehydrated = f"{rehydrated[: match.start()]}{raw_value}{rehydrated[match.end() :]}"
         return rehydrated
 
     def _record_audit(
@@ -434,7 +464,9 @@ def _merge_overlapping_entities(
 
 def _validate_entity_ranges(entities: tuple[SensitiveEntity, ...], *, text_length: int) -> None:
     """Fail closed when a detector returns a span outside its input text."""
-    if any(entity.end > text_length for entity in entities):
+    if not isinstance(entities, tuple) or any(
+        not isinstance(entity, SensitiveEntity) or entity.end > text_length for entity in entities
+    ):
         raise DetectionUnavailableError
 
 
