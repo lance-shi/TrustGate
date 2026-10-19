@@ -10,6 +10,11 @@ from typing import Annotated, Any, ClassVar, Literal, Mapping, Self
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_serializer
 from typing_extensions import TypeAliasType
 
+from .entity import (
+    EntityResolutionReason,
+    EntityResolutionState,
+    _is_valid_resolution_reason,
+)
 from .exceptions import ModelValidationError, PolicyValidationError
 
 JsonValue = TypeAliasType(
@@ -203,6 +208,18 @@ class ToolCall(SafePublicModel):
     arguments: dict[str, JsonValue] = Field(default_factory=dict)
 
 
+class AuditResolution(SafePublicModel):
+    """One person occurrence's safe evidence, without name or candidate data."""
+
+    token: AuditIdentifier
+    state: EntityResolutionState
+    reason: EntityResolutionReason
+
+    def model_post_init(self, __context: object) -> None:
+        if not _is_valid_resolution_reason(state=self.state, reason=self.reason):
+            raise ValueError("Invalid audit resolution.")
+
+
 class AuditEvent(SafePublicModel):
     """A serializable audit record that intentionally has no raw-value field."""
 
@@ -213,4 +230,5 @@ class AuditEvent(SafePublicModel):
     decision: DataReleaseDecision | None = None
     tokens: tuple[AuditIdentifier, ...] = ()
     failure_reason: AuditFailureReason | None = None
+    resolutions: tuple[AuditResolution, ...] = ()
     occurred_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

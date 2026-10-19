@@ -186,14 +186,15 @@ def test_close_clears_custom_aliases_even_through_a_retained_producer_reference(
 
 
 def test_custom_aliases_never_appear_in_results_audits_or_logs(caplog) -> None:
+    # Avoid an alias that is a substring of fixed audit vocabulary ("normalized").
     gate = _gate()
-    session = gate.session(aliases={"Liz": ["Elizabeth"]})
-    session._detector = NameDetector(("Elizabeth Taylor", "Liz Taylor"))
+    session = gate.session(aliases={"Beth": ["Elizabeth"]})
+    session._detector = NameDetector(("Elizabeth Taylor", "Beth Taylor"))
     token = session.sanitize("Elizabeth Taylor")
-    result = {"owner": ["Liz Taylor"]}
+    result = {"owner": ["Beth Taylor"]}
     safe = session.sanitize_tool_result(result)
     assert safe == {"owner": [token]}
-    assert result == {"owner": ["Liz Taylor"]}
+    assert result == {"owner": ["Beth Taylor"]}
     _rehydrate(session, token)
     session.close()
     assert_no_raw_sensitive_values(
@@ -205,9 +206,9 @@ def test_custom_aliases_never_appear_in_results_audits_or_logs(caplog) -> None:
             repr(session._entity_resolver),
             caplog.text,
         ),
-        "Liz",
+        "Beth",
         "Elizabeth",
-        "liz",
+        "beth",
         "elizabeth",
     )
 

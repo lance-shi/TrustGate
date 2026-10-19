@@ -25,6 +25,7 @@ from .models import (
     AuditEvent,
     AuditEventType,
     AuditFailureReason,
+    AuditResolution,
     DataReleaseDecision,
     DataReleaseRequest,
     DataReleaseResult,
@@ -119,8 +120,11 @@ class TrustSession:
         """Replace detected sensitive spans with stable session-local tokens."""
         with self._lock:
             self._ensure_open()
-            sanitized, tokens = self._sanitize_text(text)
-            self._record_audit(AuditEventType.VALUE_SANITIZED, tokens=tokens)
+            resolutions: list[AuditResolution] = []
+            sanitized, tokens = self._sanitize_text(text, resolutions=resolutions)
+            self._record_audit(
+                AuditEventType.VALUE_SANITIZED, tokens=tokens, resolutions=tuple(resolutions)
+            )
             return sanitized
 
     def rehydrate_for_tool(self, tool_call: ToolCall) -> dict[str, JsonValue]:
@@ -165,13 +169,17 @@ class TrustSession:
         with self._lock:
             self._ensure_open()
             tokens: list[SensitiveToken] = []
+            resolutions: list[AuditResolution] = []
             try:
-                sanitized = self._sanitize_result_value(value=result, tokens=tokens)
+                sanitized = self._sanitize_result_value(
+                    value=result, tokens=tokens, resolutions=resolutions
+                )
             except DetectionUnavailableError:
                 self._record_audit(
                     AuditEventType.TOOL_RESULT_SANITIZATION_FAILED,
                     failure_reason=AuditFailureReason.DETECTION_UNAVAILABLE,
                     tokens=tuple(tokens),
+                    resolutions=tuple(resolutions),
                 )
                 raise
             except ToolResultSanitizationError:
@@ -179,9 +187,14 @@ class TrustSession:
                     AuditEventType.TOOL_RESULT_SANITIZATION_FAILED,
                     failure_reason=AuditFailureReason.UNSAFE_RESULT_STRUCTURE,
                     tokens=tuple(tokens),
+                    resolutions=tuple(resolutions),
                 )
                 raise
-            self._record_audit(AuditEventType.TOOL_RESULT_SANITIZED, tokens=tuple(tokens))
+            self._record_audit(
+                AuditEventType.TOOL_RESULT_SANITIZED,
+                tokens=tuple(tokens),
+                resolutions=tuple(resolutions),
+            )
             return sanitized
 
     def rehydrate_for_user(self, text: str) -> str:
@@ -207,7 +220,9 @@ class TrustSession:
         # after leaving the handler so detector exceptions cannot expose text.
         raise DetectionUnavailableError
 
-    def _sanitize_text(self, text: str) -> tuple[str, tuple[SensitiveToken, ...]]:
+    def _sanitize_text(
+        self, text: str, *, resolutions: list[AuditResolution]
+    ) -> tuple[str, tuple[SensitiveToken, ...]]:
         entities = self._detect(text)
         _validate_entity_ranges(entities, text_length=len(text))
         tokens: list[SensitiveToken] = []
@@ -217,6 +232,7 @@ class TrustSession:
             token = self._tokenize_entity(
                 entity=entity,
                 raw_value=raw_value,
+                resolutions=resolutions,
             )
             tokens.append(token)
             replacements.append((entity, token))
@@ -231,6 +247,7 @@ class TrustSession:
         *,
         entity: SensitiveEntity,
         raw_value: str,
+        resolutions: list[AuditResolution],
     ) -> SensitiveToken:
         if entity.entity_type == "PERSON":
             result = self._entity_resolver.resolve_person(
@@ -239,11 +256,19 @@ class TrustSession:
                 end=entity.end,
             )
             resolved_entity = result.token_entity
-            return self._vault.store(
+            token = self._vault.store(
                 value=resolved_entity.canonical_value,
                 entity_type=resolved_entity.entity_type,
                 identity_id=resolved_entity.entity_id,
             )
+            resolutions.append(
+                AuditResolution(
+                    token=audit_identifier(token.value),
+                    state=result.resolution.state,
+                    reason=result.resolution.reason,
+                )
+            )
+            return token
         return self._vault.store(value=raw_value, entity_type=entity.entity_type)
 
     def _sanitize_result_value(
@@ -251,25 +276,31 @@ class TrustSession:
         *,
         value: object,
         tokens: list[SensitiveToken],
+        resolutions: list[AuditResolution],
     ) -> JsonValue:
         if isinstance(value, str):
-            sanitized, detected_tokens = self._sanitize_text(value)
+            sanitized, detected_tokens = self._sanitize_text(value, resolutions=resolutions)
             tokens.extend(detected_tokens)
             return sanitized
         if value is None or isinstance(value, bool | int | float):
             return value
         if isinstance(value, list):
-            return [self._sanitize_result_value(value=item, tokens=tokens) for item in value]
+            return [
+                self._sanitize_result_value(value=item, tokens=tokens, resolutions=resolutions)
+                for item in value
+            ]
         if isinstance(value, dict):
             sanitized: dict[str, JsonValue] = {}
             for key, item in value.items():
                 if not isinstance(key, str):
                     raise ToolResultSanitizationError
-                sanitized_key, key_tokens = self._sanitize_text(key)
+                sanitized_key, key_tokens = self._sanitize_text(key, resolutions=resolutions)
                 tokens.extend(key_tokens)
                 if sanitized_key in sanitized:
                     raise ToolResultSanitizationError
-                sanitized[sanitized_key] = self._sanitize_result_value(value=item, tokens=tokens)
+                sanitized[sanitized_key] = self._sanitize_result_value(
+                    value=item, tokens=tokens, resolutions=resolutions
+                )
             return sanitized
         raise ToolResultSanitizationError
 
@@ -334,6 +365,7 @@ class TrustSession:
         decision: DataReleaseDecision | None = None,
         tokens: tuple[SensitiveToken, ...] = (),
         failure_reason: AuditFailureReason | None = None,
+        resolutions: tuple[AuditResolution, ...] = (),
     ) -> None:
         unique_tokens = tuple(dict.fromkeys(audit_identifier(token.value) for token in tokens))
         entity_types = tuple(dict.fromkeys(audit_identifier(token.entity_type) for token in tokens))
@@ -346,6 +378,7 @@ class TrustSession:
                 decision=decision,
                 tokens=unique_tokens,
                 failure_reason=failure_reason,
+                resolutions=resolutions,
             )
         )
 

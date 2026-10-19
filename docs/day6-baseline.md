@@ -83,13 +83,31 @@ Paths in the following table are relative to `tests/`.
 - [x] Record reproducible commands and distinguish environment errors from failures.
 - [x] Map existing tests to Day 6 requirements and record missing coverage.
 
-### Step 2: safe audit metadata
+### Step 2: safe audit metadata — complete on 2026-10-19
 
-- [ ] Define fixed safe resolution states/reasons without raw names or free-form errors.
-- [ ] Cover exact, unique partial, unique alias, unresolved, and ambiguous outcomes.
-- [ ] Verify emitted event JSON excludes raw/normalized names, runtime alias entries,
+- [x] Define fixed safe resolution states/reasons without raw names or free-form errors.
+- [x] Cover exact, unique partial, unique alias, unresolved, and ambiguous outcomes.
+- [x] Verify emitted event JSON excludes raw/normalized names, runtime alias entries,
       vault mappings, and rehydrated arguments.
-- [ ] Preserve release-policy decisions and canonical token behavior.
+- [x] Preserve release-policy decisions and canonical token behavior.
+
+Implementation adds typed `AuditResolution` entries to existing sanitization
+events, including safe processed evidence on supported tool-result failure paths.
+Each entry holds only the opaque token audit identifier and validated state/reason
+enums. No additional event types or release decisions are introduced. Non-person,
+lifecycle, and release events keep an empty resolution tuple.
+
+`tests/test_audit_resolution.py` adds 40 cases covering per-occurrence ordering,
+nested keys/values, all five states, safe JSON round trips, failure events,
+independent sessions, stable uncertain evidence, canonical read/write release,
+default deny, and invalid metadata through construction/validation/copy paths.
+The existing alias leakage test uses `Beth` in place of `Liz` because the fixed
+reason `exact_normalized_full_name` contains the substring `liz`; the same raw
+and normalized alias leakage assertions remain in place.
+
+Step 2 verification: initial focused set 53 passed; final full suite 379 passed
+in 4.33 seconds, including the subsequently added same-text occurrence test;
+Ruff passed. The original 339-test baseline above remains the pre-change record.
 
 ### Step 3: optional sanitized transcript
 

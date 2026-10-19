@@ -1,6 +1,7 @@
 """Private, session-local records used for person-entity resolution.
 
-These records deliberately remain outside the public package API.  They may
+The state and reason enums are safe public metadata. The other records remain
+outside the public package API. They may
 contain raw or normalized sensitive values and must never be sent to an audit
 sink, log, exception, or LLM-facing return value.
 """

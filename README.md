@@ -176,6 +176,23 @@ safe metadata: session ID, event type, release decision, and opaque audit
 identifiers for entity types, tokens, and destination. They never include vault
 mappings or raw sensitive values.
 
+Sanitization events also include a `resolutions` tuple with one entry per
+detected person occurrence, in processing order. Each entry contains only an
+opaque token audit identifier, a fixed `EntityResolutionState`, and a fixed
+`EntityResolutionReason`. States are `exact`, `unique_partial`, `unique_alias`,
+`unresolved`, and `ambiguous`; reasons distinguish full-name matches, first- or
+last-name matches, alias matches, and absent or conflicting candidates. An
+`exact` state also describes a newly registered full name, not verified identity.
+Multiple occurrences may reference the same token with different reasons.
+
+These entries never contain names, normalized names, aliases, candidate lists,
+or canonical tool values. Non-person, lifecycle, and tool-release events have
+no resolution entries. A failed tool-result event may include safe evidence
+from occurrences processed before failure; it does not indicate a successful
+result or data release. Audit snapshots remain readable after session close.
+The typed `AuditResolution` model rejects unknown fields, invalid identifiers,
+and inconsistent state/reason combinations with a non-sensitive exception.
+
 ## Workflow
 
 ```text
