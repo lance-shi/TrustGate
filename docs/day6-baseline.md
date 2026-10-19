@@ -184,13 +184,39 @@ Step 4 verification: focused boundary/transcript/audit set 150 passed; full suit
 490 passed in 4.89 seconds; Ruff passed. No tests were skipped. README documents
 the safe failure categories and the explicit cleanup contract.
 
-### Step 5: runnable example
+### Step 5: runnable example — complete on 2026-10-19
 
-- [ ] Use public APIs, mock LLM/tools, and the local detector without framework coupling.
-- [ ] Demonstrate stable tokens, a deliberately ambiguous name, allowed release,
+- [x] Use public APIs, mock LLM/tools, and the local detector without framework coupling.
+- [x] Demonstrate stable tokens, a deliberately ambiguous name, allowed release,
       denied release, result sanitization, and explicit session closure.
-- [ ] Add a smoke test that captures stdout/stderr and rejects sensitive values.
-- [ ] Avoid fixed token sequence numbers and runtime model downloads.
+- [x] Add a smoke test that captures stdout/stderr and rejects sensitive values.
+- [x] Avoid fixed token sequence numbers and runtime model downloads.
+
+`examples/boundary_demo.py` runs with the installed package/local model and uses
+the policy beside the script. It passes sanitized input to a mock LLM, releases
+approved raw arguments to mock read/write tools, sanitizes nested tool results,
+and passes those safe results back to the mock LLM for replies. A title follow-up
+reuses the original person token; a conflicting alias retains its own ambiguous
+token. The example also verifies denied release, cross-session replay rejection,
+and closed-session rejection. Its JSON report includes only checked safe values,
+fixed confirmations, the sanitized transcript, and a compact audit summary.
+
+Only public TrustGate APIs are used. There are no real writes, external LLM calls,
+API keys, or downloads. Known synthetic fixture checks run before LLM input and
+console output; these are explicitly not a general detector. CLI failures emit a
+fixed stderr message with nonzero status, without arbitrary exception text.
+
+`tests/test_boundary_demo.py` adds 8 cases covering real local detection, both
+mock boundaries (including sanitized results reaching the mock LLM), stdout/stderr
+and log safety, offline execution, repeated runs with different token sequences,
+standalone execution from another working directory, and model/tool/detection/
+policy failures. The subprocess test explicitly uses DEVNULL for stdin to avoid
+an invalid inherited Windows console handle.
+
+Step 5 verification: the focused 8-case set passed before the final reply-path
+addition; the final full suite, including all 8 updated example cases, passed
+498 tests in 8.74 seconds. The final direct script invocation exited 0 with only
+the safe JSON report. Ruff and example/test formatting checks passed.
 
 ### Step 6: documentation and final checks
 

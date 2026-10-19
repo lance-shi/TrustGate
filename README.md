@@ -254,6 +254,49 @@ appear in this opt-in history. `TranscriptEntry` validates structure, not
 sensitivity; constructing one directly does not sanitize its content. Verify
 the local detector's coverage for your data before enabling content collection.
 
+## Runnable local example
+
+After the package and local model are installed using the setup commands above,
+run this from the repository root:
+
+```bash
+python examples/boundary_demo.py
+```
+
+On Windows, if `python` selects an inaccessible WindowsApps alias, use the
+installed launcher:
+
+```powershell
+& "$env:LOCALAPPDATA\Python\bin\python.exe" examples/boundary_demo.py
+```
+
+The example uses the real local detector, synthetic data, a mock LLM, and mock
+read/write tools. No API key or network connection is needed. The mock LLM
+receives only sanitized text and constructs calls using observed tokens. After
+explicit policy allowance, the trusted mock tool receives raw arguments; its
+nested result is sanitized before becoming LLM-visible. Both read and write
+destinations use the same release path; the write is only an in-memory simulation.
+
+The JSON report shows tokenized input/calls/results, mock replies, a stable follow-up token,
+an ambiguous alias with its own token, a denied release, cross-session replay
+rejection, and rejection after session close. It also includes the optional
+sanitized transcript and a compact audit summary. Tokens come from actual
+sanitized output; their numbers may differ between runs.
+
+The script loads its policy relative to its own file, so an absolute script
+path also works from another working directory. It checks these known demo
+fixtures before printing anything. Missing detection, policy, or tool failures
+produce a fixed stderr message and a nonzero exit status without printing raw
+values or exception details. Those fixture checks do not replace a general
+detector or establish coverage for other data. The model must already be local;
+the example never downloads one at runtime.
+
+Run the example regressions with:
+
+```bash
+python -m pytest tests/test_boundary_demo.py
+```
+
 ## Workflow
 
 ```text
@@ -288,5 +331,4 @@ arguments -> copied, sanitized nested results -> follow-up -> session closure,
 including custom aliases, ambiguous identities, denied destinations, and
 cross-session replay. Candidate and session tests use controlled detector spans
 to verify resolution rules independently of NER accuracy. Optional sanitized
-transcript collection is now implemented; a standalone demonstration remains
-later work.
+transcript collection and the runnable example above are implemented.
