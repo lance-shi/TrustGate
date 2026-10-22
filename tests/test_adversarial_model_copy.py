@@ -36,7 +36,9 @@ class SecretObject:
 @pytest.mark.parametrize("kind", ["token", "call", "policy"])
 def test_copy_update_iterator_errors_have_only_safe_model_errors(kind, caplog, capsys):
     model = {
-        "token": lambda: SensitiveToken(value="[PERSON_1]", entity_type="PERSON"),
+        "token": lambda: SensitiveToken(
+            value="[PERSON_00000000000000000000000000000000_1]", entity_type="PERSON"
+        ),
         "call": lambda: ToolCall(name="lookup"),
         "policy": lambda: TrustPolicy(version=1, data_policies={}),
     }[kind]()
@@ -68,9 +70,12 @@ def test_copy_of_mutated_call_does_not_emit_serializer_warning_with_raw_repr(cap
 
 @pytest.mark.parametrize("deep", [False, True])
 def test_valid_model_copy_preserves_validation_and_independent_argument_containers(deep):
-    call = ToolCall(name="lookup", arguments={"nested": [{"value": "[PERSON_1]"}]})
+    call = ToolCall(
+        name="lookup",
+        arguments={"nested": [{"value": "[PERSON_00000000000000000000000000000000_1]"}]},
+    )
     copied = call.model_copy(deep=deep)
     assert copied == call
     assert copied.arguments is not call.arguments
     copied.arguments["nested"][0]["value"] = "ordinary"
-    assert call.arguments["nested"][0]["value"] == "[PERSON_1]"
+    assert call.arguments["nested"][0]["value"] == "[PERSON_00000000000000000000000000000000_1]"

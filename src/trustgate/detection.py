@@ -10,6 +10,7 @@ import spacy
 from presidio_analyzer import AnalyzerEngine, Pattern, PatternRecognizer
 from presidio_analyzer.nlp_engine import NlpEngineProvider
 
+from ._detection_logging import _private_detection_logs
 from .entity import _is_supported_person_title
 from .exceptions import DetectionUnavailableError
 from .models import SensitiveEntity
@@ -24,29 +25,30 @@ class PresidioDetector:
 
     def __init__(self, *, model_name: str = DEFAULT_SPACY_MODEL) -> None:
         try:
-            # Presidio otherwise attempts to download a missing model. Refuse
-            # before calling it, without logging the supplied name or path.
-            if not (spacy.util.is_package(model_name) or Path(model_name).exists()):
-                raise DetectionUnavailableError
-            nlp_engine = NlpEngineProvider(
-                nlp_configuration={
-                    "nlp_engine_name": "spacy",
-                    "models": [{"lang_code": "en", "model_name": model_name}],
-                }
-            ).create_engine()
-            self._analyzer = AnalyzerEngine(nlp_engine=nlp_engine)
-            self._analyzer.registry.add_recognizer(
-                PatternRecognizer(
-                    supported_entity="ACCOUNT_NUMBER",
-                    patterns=[
-                        Pattern(
-                            name="eight_digit_account_number",
-                            regex=r"\b\d{8}\b",
-                            score=0.85,
-                        )
-                    ],
+            with _private_detection_logs():
+                # Presidio otherwise attempts to download a missing model. Refuse
+                # before calling it, without logging the supplied name or path.
+                if not (spacy.util.is_package(model_name) or Path(model_name).exists()):
+                    raise DetectionUnavailableError
+                nlp_engine = NlpEngineProvider(
+                    nlp_configuration={
+                        "nlp_engine_name": "spacy",
+                        "models": [{"lang_code": "en", "model_name": model_name}],
+                    }
+                ).create_engine()
+                self._analyzer = AnalyzerEngine(nlp_engine=nlp_engine)
+                self._analyzer.registry.add_recognizer(
+                    PatternRecognizer(
+                        supported_entity="ACCOUNT_NUMBER",
+                        patterns=[
+                            Pattern(
+                                name="eight_digit_account_number",
+                                regex=r"\b\d{8}\b",
+                                score=0.85,
+                            )
+                        ],
+                    )
                 )
-            )
         except Exception:
             failed = True
         else:
@@ -57,11 +59,12 @@ class PresidioDetector:
     def detect(self, text: str) -> tuple[SensitiveEntity, ...]:
         """Return detected entity metadata without retaining or returning raw text."""
         try:
-            results = self._analyzer.analyze(
-                text=text,
-                language="en",
-                entities=list(SUPPORTED_ENTITIES),
-            )
+            with _private_detection_logs():
+                results = self._analyzer.analyze(
+                    text=text,
+                    language="en",
+                    entities=list(SUPPORTED_ENTITIES),
+                )
         except Exception:
             results = None
         if results is None:

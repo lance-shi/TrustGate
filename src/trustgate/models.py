@@ -17,6 +17,7 @@ from pydantic import (
 )
 from typing_extensions import TypeAliasType
 
+from ._token_format import TOKEN_EXPRESSION
 from .entity import (
     EntityResolutionReason,
     EntityResolutionState,
@@ -31,7 +32,7 @@ JsonValue = TypeAliasType(
 EntityType = Annotated[str, Field(pattern=r"^[A-Z][A-Z0-9_]*$", min_length=1)]
 TokenValue = Annotated[
     str,
-    Field(pattern=r"^\[[A-Z][A-Z0-9_]*_[1-9][0-9]*\]$", min_length=5),
+    Field(pattern=TOKEN_EXPRESSION, min_length=38),
 ]
 Destination = Annotated[str, Field(min_length=1, max_length=256)]
 AuditIdentifier = Annotated[

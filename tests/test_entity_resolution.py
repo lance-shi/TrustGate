@@ -68,7 +68,7 @@ def test_exact_normalized_full_names_reuse_one_llm_visible_token() -> None:
 
     sanitized = session.sanitize(text)
 
-    assert fullmatch(r"\[PERSON_([1-9][0-9]*)\] met \[PERSON_\1\]\.", sanitized)
+    assert fullmatch(r"\[PERSON_([0-9a-f]{32}_[1-9][0-9]*)\] met \[PERSON_\1\]\.", sanitized)
     assert_no_raw_sensitive_values(sanitized, first_name, second_name)
 
 
@@ -85,7 +85,10 @@ def test_identity_relevant_internal_punctuation_does_not_merge_full_names() -> N
     )
 
     sanitized = session.sanitize(text)
-    match = fullmatch(r"\[PERSON_([1-9][0-9]*)\] met \[PERSON_([1-9][0-9]*)\]\.", sanitized)
+    match = fullmatch(
+        r"\[PERSON_([0-9a-f]{32}_[1-9][0-9]*)\] met \[PERSON_([0-9a-f]{32}_[1-9][0-9]*)\]\.",
+        sanitized,
+    )
 
     assert match is not None
     assert match.group(1) != match.group(2)
@@ -198,7 +201,10 @@ def test_single_component_names_do_not_merge_on_casefolding() -> None:
 
     sanitized = session.sanitize(text)
 
-    match = fullmatch(r"\[PERSON_([1-9][0-9]*)\] met \[PERSON_([1-9][0-9]*)\]\.", sanitized)
+    match = fullmatch(
+        r"\[PERSON_([0-9a-f]{32}_[1-9][0-9]*)\] met \[PERSON_([0-9a-f]{32}_[1-9][0-9]*)\]\.",
+        sanitized,
+    )
     assert match is not None
     assert match.group(1) != match.group(2)
 
@@ -218,7 +224,10 @@ def test_different_normalized_full_names_remain_distinct_and_audit_stays_safe() 
 
     sanitized = session.sanitize(text)
 
-    match = fullmatch(r"\[PERSON_([1-9][0-9]*)\] met \[PERSON_([1-9][0-9]*)\]\.", sanitized)
+    match = fullmatch(
+        r"\[PERSON_([0-9a-f]{32}_[1-9][0-9]*)\] met \[PERSON_([0-9a-f]{32}_[1-9][0-9]*)\]\.",
+        sanitized,
+    )
     assert match is not None
     assert match.group(1) != match.group(2)
     assert_no_raw_sensitive_values(audit_sink.events, first_name, second_name)

@@ -1,10 +1,14 @@
-# TrustGate v0.1 final local acceptance
+# TrustGate v0.1 initial local acceptance
 
 Date: 2026-10-22 (Australia/Sydney).
 Package: `trustgate` **0.1.0**, development status **pre-alpha**.
 Baseline revision: `5c4a8534f89f0cc79528d7b8e8b35e7d7d251c09`.
 
-**Status: passed for the documented local v0.1 scope.** All six Day 7 steps
+**Historical status: superseded by [security review fixes](security-review-fixes.md).**
+The three subsequently reproduced security defects invalidate this report as
+current release evidence. The results below describe the earlier candidate.
+
+**Original result: passed for the documented local v0.1 scope.** All six Day 7 steps
 are complete. Acceptance applies to the reviewed working-tree contents and
 locally built artifacts; it does not identify a newly created commit or tag.
 

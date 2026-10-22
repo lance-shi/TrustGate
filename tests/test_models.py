@@ -19,7 +19,9 @@ AUDIT_IDENTIFIER = "audit_" + "0" * 64
 
 def test_core_models_accept_valid_non_sensitive_metadata() -> None:
     SensitiveEntity(entity_type="ACCOUNT_NUMBER", start=2, end=10, score=0.95)
-    token = SensitiveToken(value="[ACCOUNT_NUMBER_1]", entity_type="ACCOUNT_NUMBER")
+    token = SensitiveToken(
+        value="[ACCOUNT_NUMBER_00000000000000000000000000000000_1]", entity_type="ACCOUNT_NUMBER"
+    )
     tool_call = ToolCall(name="get_account", arguments={"account": token.value})
     result = DataReleaseResult(
         entity_type="ACCOUNT_NUMBER",
@@ -100,7 +102,7 @@ def test_alternate_pydantic_validation_paths_hide_raw_input(operation: object) -
             entity_type="ACCOUNT_NUMBER",
         ),
         lambda raw_value: SensitiveToken(
-            value="[ACCOUNT_NUMBER_1]",
+            value="[ACCOUNT_NUMBER_00000000000000000000000000000000_1]",
             entity_type="ACCOUNT_NUMBER",
         ).model_copy(update={"value": raw_value}),
     ],

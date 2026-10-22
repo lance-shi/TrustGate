@@ -26,8 +26,8 @@ POLICY_PATH = Path(__file__).resolve().parents[1] / "examples" / "sample-policy.
 def _mock_llm(safe_input: str, destination: str) -> ToolCall:
     """The LLM side receives only sanitized text and returns token references."""
     assert_no_raw_sensitive_values(safe_input, "Ada", "Lovelace", "12345678")
-    person = re.search(r"\[PERSON_[1-9][0-9]*\]", safe_input)
-    account = re.search(r"\[ACCOUNT_NUMBER_[1-9][0-9]*\]", safe_input)
+    person = re.search(r"\[PERSON_[0-9a-f]{32}_[1-9][0-9]*\]", safe_input)
+    account = re.search(r"\[ACCOUNT_NUMBER_[0-9a-f]{32}_[1-9][0-9]*\]", safe_input)
     assert person is not None and account is not None
     return ToolCall(
         name=destination,
@@ -96,7 +96,7 @@ def test_real_detector_custom_alias_and_builtin_alias_ambiguity(caplog) -> None:
         canonical = session.sanitize("Elizabeth Taylor")
         assert session.sanitize("Liz Taylor") == canonical
         safe_input = session.sanitize("Joanna Taylor met Joseph Taylor. Ask Jo Taylor.")
-        tokens = re.findall(r"\[PERSON_[1-9][0-9]*\]", safe_input)
+        tokens = re.findall(r"\[PERSON_[0-9a-f]{32}_[1-9][0-9]*\]", safe_input)
         assert len(tokens) == len(set(tokens)) == 3
         assert session.sanitize("Jo Taylor") == tokens[-1]
         call = ToolCall(name="get_account", arguments={"person": canonical})

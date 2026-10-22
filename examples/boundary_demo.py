@@ -39,8 +39,8 @@ def _check_safe(value: JsonValue) -> None:
 def mock_llm(safe_input: str, destination: str) -> ToolCall:
     """Only tokenized text reaches this mock; it has no session or vault access."""
     _check_safe(safe_input)
-    people = re.findall(r"\[PERSON_[1-9][0-9]*\]", safe_input)
-    accounts = re.findall(r"\[ACCOUNT_NUMBER_[1-9][0-9]*\]", safe_input)
+    people = re.findall(r"\[PERSON_[0-9a-f]{32}_[1-9][0-9]*\]", safe_input)
+    accounts = re.findall(r"\[ACCOUNT_NUMBER_[0-9a-f]{32}_[1-9][0-9]*\]", safe_input)
     _require(len(people) == len(accounts) == 1)
     return ToolCall(name=destination, arguments={"owner": people[0], "account": accounts[0]})
 
@@ -105,7 +105,7 @@ def run_demo() -> dict[str, JsonValue]:
 
         safe_ambiguity = session.sanitize("Joanna Taylor met Joseph Taylor. Ask Jo Taylor.")
         _check_safe(safe_ambiguity)
-        candidates = re.findall(r"\[PERSON_[1-9][0-9]*\]", safe_ambiguity)
+        candidates = re.findall(r"\[PERSON_[0-9a-f]{32}_[1-9][0-9]*\]", safe_ambiguity)
         _require(len(candidates) == len(set(candidates)) == 3)
         ambiguity_event = gate.audit_sink.events[-1]
         _require(ambiguity_event.resolutions[-1].state is EntityResolutionState.AMBIGUOUS)

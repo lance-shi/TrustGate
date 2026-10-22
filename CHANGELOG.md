@@ -1,6 +1,23 @@
 # TrustGate release notes
 
-## 0.1.0 — local acceptance, 2026-10-22
+## 0.1.0 candidate — security review fixes, 2026-10-22
+
+- Reject cross-type overlapping detector spans instead of selecting one type
+  and losing other types' destination restrictions. Same-type overlap remains
+  supported. Both input and tool-result paths fail with a safe
+  `DetectionUnavailableError` without partial LLM output.
+- Suppress Presidio diagnostic records within detector initialization and
+  analysis, including DEBUG logs containing normalized context. Suppression is
+  context-local; host levels/handlers and unrelated threads are preserved.
+- Add a random 32-hex namespace per vault to tokens, preventing cross-process
+  lifecycle reuse. The format is now `[TYPE_<namespace>_<sequence>]`.
+  Legacy unnamespaced tokens are malformed; copy opaque tokens from current
+  sanitized output rather than constructing them.
+- Update examples, parsing assertions, installed smoke checks, and security
+  regressions. Current validation is recorded in the
+  [security review follow-up](docs/security-review-fixes.md).
+
+## 0.1.0 — initial local acceptance, 2026-10-22
 
 Status: pre-alpha. This records the initial documented v0.1 implementation and
 completed local verification. Distribution artifacts are built locally; this

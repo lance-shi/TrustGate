@@ -566,7 +566,9 @@ def _validate_entity_ranges(entities: tuple[SensitiveEntity, ...], *, text_lengt
 
 
 def _merge_cluster(cluster: list[SensitiveEntity]) -> SensitiveEntity:
-    """Choose a deterministic entity type while preserving a cluster's full range."""
+    """Merge one type only; never discard another type's release restrictions."""
+    if len({entity.entity_type for entity in cluster}) != 1:
+        raise DetectionUnavailableError
     representative = max(
         cluster,
         key=lambda entity: (entity.score, entity.end - entity.start, entity.entity_type),

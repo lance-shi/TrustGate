@@ -17,7 +17,7 @@ class FeatureUnavailableError(TrustGateError):
 
 
 class DetectionUnavailableError(TrustGateError):
-    """Raised when the configured local sensitive-data detector cannot load."""
+    """Raised when detection is unavailable or its spans cannot be handled safely."""
 
     default_message = "The local sensitive-data detector is unavailable."
 

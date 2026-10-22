@@ -10,6 +10,7 @@ from security_assertions import assert_no_raw_sensitive_values
 from trustgate import (
     CrossSessionTokenError,
     DataReleaseDenied,
+    DetectionUnavailableError,
     SensitiveEntity,
     ToolCall,
     TrustPolicy,
@@ -37,9 +38,17 @@ class Detector:
             "ACCOUNT_NUMBER",
         ),
         ([("PERSON", 0, 12, 0.9), ("PERSON", 0, 12, 0.9)], "PERSON"),
+        ([("ACCOUNT_NUMBER", 0, 6, 0.9), ("ACCOUNT_NUMBER", 5, 12, 0.8)], "ACCOUNT_NUMBER"),
         ([("ACCOUNT_NUMBER", 0, 12, 0.9), ("PERSON", 2, 8, 0.9)], "ACCOUNT_NUMBER"),
     ],
-    ids=["type-tie", "containment", "chained-overlap", "duplicate", "length-tie"],
+    ids=[
+        "type-tie",
+        "containment",
+        "chained-overlap",
+        "duplicate",
+        "same-type-overlap",
+        "length-tie",
+    ],
 )
 @pytest.mark.parametrize("transcript", [False, True])
 @pytest.mark.parametrize("boundary", ["input", "result"])
@@ -65,6 +74,19 @@ def test_conflict_replacement_is_order_independent_and_keeps_release_boundary(
         ) as session:
             raw = {"items": [RAW_VALUE, {"again": RAW_VALUE}]}
             original = deepcopy(raw)
+            if len({entity.entity_type for entity in entities}) > 1:
+                with pytest.raises(DetectionUnavailableError) as error:
+                    if boundary == "input":
+                        session.sanitize(RAW_VALUE)
+                    else:
+                        session.sanitize_tool_result(raw)
+                assert raw == original
+                assert session.transcript == ()
+                assert session._vault._entries_by_token == {}
+                assert_no_raw_sensitive_values(
+                    (error.value, session._audit_sink.events, caplog.text), RAW_VALUE
+                )
+                continue
             if boundary == "input":
                 token = session.sanitize(RAW_VALUE)
             else:
@@ -72,7 +94,7 @@ def test_conflict_replacement_is_order_independent_and_keeps_release_boundary(
                 token = safe["items"][0]
                 assert safe["items"][1]["again"] == token
                 assert raw == original
-            assert re.fullmatch(rf"\[{kind}_[1-9][0-9]*\]", token)
+            assert re.fullmatch(rf"\[{kind}_[0-9a-f]{{32}}_[1-9][0-9]*\]", token)
             assert session.sanitize(RAW_VALUE) == token
             before = session.transcript
             for destination in ("read_value", "write_value"):

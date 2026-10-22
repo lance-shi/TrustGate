@@ -88,8 +88,8 @@ def run(model_path: Path) -> dict[str, object]:
         ) as session:
             safe_input = session.sanitize(f"{RAW_PERSON} has account {RAW_ACCOUNT}.")
             _safe(safe_input)
-            person = re.search(r"\[PERSON_[1-9][0-9]*\]", safe_input)
-            account = re.search(r"\[ACCOUNT_NUMBER_[1-9][0-9]*\]", safe_input)
+            person = re.search(r"\[PERSON_[0-9a-f]{32}_[1-9][0-9]*\]", safe_input)
+            account = re.search(r"\[ACCOUNT_NUMBER_[0-9a-f]{32}_[1-9][0-9]*\]", safe_input)
             _require(person is not None and account is not None)
             tokens = {"owner": person.group(), "account": account.group()}
             llm_seen = [safe_input]
@@ -110,7 +110,7 @@ def run(model_path: Path) -> dict[str, object]:
             _require(session.sanitize("Mr Lovelace") == tokens["owner"])
             uncertain = session.sanitize(f"{RAW_NAMES[0]} met {RAW_NAMES[1]}. Ask {RAW_NAMES[2]}.")
             _safe(uncertain)
-            _require(len(set(re.findall(r"\[PERSON_[1-9][0-9]*\]", uncertain))) == 3)
+            _require(len(set(re.findall(r"\[PERSON_[0-9a-f]{32}_[1-9][0-9]*\]", uncertain))) == 3)
             before = session.transcript
             try:
                 session.rehydrate_for_tool(ToolCall(name="blocked", arguments=tokens))

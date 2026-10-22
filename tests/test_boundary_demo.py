@@ -69,12 +69,12 @@ def _assert_report(report):
     owner = calls[0]["arguments"]["owner"]
     account = calls[0]["arguments"]["account"]
     assert calls[0]["arguments"] == calls[1]["arguments"]
-    assert re.fullmatch(r"\[PERSON_[1-9][0-9]*\]", owner)
-    assert re.fullmatch(r"\[ACCOUNT_NUMBER_[1-9][0-9]*\]", account)
+    assert re.fullmatch(r"\[PERSON_[0-9a-f]{32}_[1-9][0-9]*\]", owner)
+    assert re.fullmatch(r"\[ACCOUNT_NUMBER_[0-9a-f]{32}_[1-9][0-9]*\]", account)
     assert report["llm_input"] == f"{owner} has account {account}."
     assert report["followup"] == owner
     assert report["ambiguity"]["state"] == "ambiguous"
-    tokens = re.findall(r"\[PERSON_[1-9][0-9]*\]", report["ambiguity"]["text"])
+    tokens = re.findall(r"\[PERSON_[0-9a-f]{32}_[1-9][0-9]*\]", report["ambiguity"]["text"])
     assert len(tokens) == len(set(tokens)) == 3
     assert report["ambiguity"]["token"] == tokens[-1]
     assert owner not in tokens

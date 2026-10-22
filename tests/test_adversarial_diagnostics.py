@@ -153,7 +153,9 @@ def test_raising_sink_has_static_failure_without_partial_return_or_transcript(
                 call = ToolCall(
                     name="blocked" if operation == "deny" else "lookup",
                     arguments={
-                        "person": "[PERSON_" + "9" * 100 + "]" if operation == "unknown" else token
+                        "person": "[PERSON_00000000000000000000000000000000_" + "9" * 100 + "]"
+                        if operation == "unknown"
+                        else token
                     },
                 )
                 returned.append(session.rehydrate_for_tool(call))

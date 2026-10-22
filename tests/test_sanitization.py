@@ -53,7 +53,8 @@ def test_sanitize_uses_the_local_detector_and_never_returns_detected_raw_text() 
         sanitized = session.sanitize(text)
 
     assert fullmatch(
-        r"\[PERSON_[1-9][0-9]*\] has account \[ACCOUNT_NUMBER_[1-9][0-9]*\]\.",
+        r"\[PERSON_[0-9a-f]{32}_[1-9][0-9]*\] has account "
+        r"\[ACCOUNT_NUMBER_[0-9a-f]{32}_[1-9][0-9]*\]\.",
         sanitized,
     )
     assert "Ada Lovelace" not in sanitized
@@ -68,7 +69,7 @@ def test_sanitize_reuses_tokens_for_repeated_sensitive_values() -> None:
 
     sanitized = session.sanitize(text)
 
-    assert fullmatch(r"\[PERSON_([1-9][0-9]*)\] met \[PERSON_\1\]\.", sanitized)
+    assert fullmatch(r"\[PERSON_([0-9a-f]{32}_[1-9][0-9]*)\] met \[PERSON_\1\]\.", sanitized)
     assert "Ada Lovelace" not in sanitized
 
 
@@ -79,7 +80,7 @@ def test_sanitize_keeps_adjacent_sensitive_spans_separate() -> None:
     )
 
     assert fullmatch(
-        r"\[ACCOUNT_NUMBER_[1-9][0-9]*\]\[PERSON_[1-9][0-9]*\]",
+        r"\[ACCOUNT_NUMBER_[0-9a-f]{32}_[1-9][0-9]*\]\[PERSON_[0-9a-f]{32}_[1-9][0-9]*\]",
         session.sanitize(text),
     )
 
@@ -93,7 +94,8 @@ def test_sanitize_replaces_different_length_sensitive_values() -> None:
     sanitized = session.sanitize(text)
 
     assert fullmatch(
-        r"Account \[ACCOUNT_NUMBER_[1-9][0-9]*\] belongs to \[PERSON_[1-9][0-9]*\]\.",
+        r"Account \[ACCOUNT_NUMBER_[0-9a-f]{32}_[1-9][0-9]*\] belongs to "
+        r"\[PERSON_[0-9a-f]{32}_[1-9][0-9]*\]\.",
         sanitized,
     )
     assert "12345678" not in sanitized
@@ -104,7 +106,7 @@ def test_sanitize_merges_overlapping_spans_so_no_detected_text_leaks() -> None:
     session = TrustSession(
         detector=StaticDetector(
             (
-                entity("PERSON", 0, 20, score=0.8),
+                entity("ACCOUNT_NUMBER", 0, 20, score=0.8),
                 entity("ACCOUNT_NUMBER", 10, len(RAW_SENTINEL), score=0.95),
             )
         )
@@ -112,7 +114,7 @@ def test_sanitize_merges_overlapping_spans_so_no_detected_text_leaks() -> None:
 
     sanitized = session.sanitize(RAW_SENTINEL)
 
-    assert fullmatch(r"\[ACCOUNT_NUMBER_[1-9][0-9]*\]", sanitized)
+    assert fullmatch(r"\[ACCOUNT_NUMBER_[0-9a-f]{32}_[1-9][0-9]*\]", sanitized)
     assert RAW_SENTINEL not in sanitized
 
 

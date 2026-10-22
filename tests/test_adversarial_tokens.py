@@ -133,7 +133,10 @@ def test_invalid_reference_after_allowed_value_never_returns_partial_arguments(
                 )
                 return
     elif attack == "unknown":
-        bad, error_type = "[ACCOUNT_NUMBER_" + "9" * 1000 + "]", UnknownTokenError
+        bad, error_type = (
+            "[ACCOUNT_NUMBER_00000000000000000000000000000000_" + "9" * 1000 + "]",
+            UnknownTokenError,
+        )
     else:
         bad, error_type = "[ACCOUNT_NUMBER_01]", MalformedTokenError
     _check_rejected(session, destination, position, allowed, bad, error_type, caplog, capsys)
@@ -239,7 +242,10 @@ def test_every_token_in_one_string_requires_its_own_allowance(
         if attack == "denied":
             bad, error_type = session.sanitize(RAW_PERSON), DataReleaseDenied
         elif attack == "unknown":
-            bad, error_type = "[ACCOUNT_NUMBER_" + "9" * 1000 + "]", UnknownTokenError
+            bad, error_type = (
+                "[ACCOUNT_NUMBER_00000000000000000000000000000000_" + "9" * 1000 + "]",
+                UnknownTokenError,
+            )
         else:
             bad, error_type = owner.sanitize(RAW_ACCOUNT), CrossSessionTokenError
         text = bad + allowed if reverse else allowed + bad

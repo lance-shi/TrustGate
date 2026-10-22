@@ -60,7 +60,7 @@ def test_rehydrate_denies_a_disallowed_destination_without_leaking_raw_value() -
     ("token", "error_type"),
     [
         ("[account_number_1]", MalformedTokenError),
-        ("[ACCOUNT_NUMBER_99]", UnknownTokenError),
+        ("[ACCOUNT_NUMBER_00000000000000000000000000000000_99]", UnknownTokenError),
     ],
 )
 def test_rehydrate_rejects_invalid_tokens_without_disclosure(
@@ -123,9 +123,7 @@ def test_rehydrate_handles_nested_arguments_without_mutating_the_tool_call() -> 
     arguments = session.rehydrate_for_tool(tool_call)
 
     assert arguments == {
-        "filters": {
-            "accounts": [RAW_ACCOUNT, "secondary=RAW_ACCOUNT_DO_NOT_LEAK_87654321"]
-        },
+        "filters": {"accounts": [RAW_ACCOUNT, "secondary=RAW_ACCOUNT_DO_NOT_LEAK_87654321"]},
         "limit": 2,
     }
     assert tool_call.model_dump() == before

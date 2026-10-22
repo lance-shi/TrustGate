@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from re import Pattern, compile
 from threading import Lock, RLock
 from uuid import uuid4
 
+from ._token_format import TOKEN_PATTERN
 from .exceptions import CrossSessionTokenError, MalformedTokenError, UnknownTokenError
 from .models import SensitiveToken
-
-TOKEN_PATTERN: Pattern[str] = compile(r"^\[[A-Z][A-Z0-9_]*_[1-9][0-9]*\]$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,11 +27,11 @@ class TokenRegistry:
         self._next_sequence_by_entity_type: dict[str, int] = {}
         self._lock = Lock()
 
-    def issue(self, *, entity_type: str, session_id: str) -> str:
+    def issue(self, *, entity_type: str, session_id: str, namespace: str) -> str:
         """Allocate a process-unique token and record its owning session."""
         with self._lock:
             sequence = self._next_sequence_by_entity_type.get(entity_type, 0) + 1
-            token = f"[{entity_type}_{sequence}]"
+            token = f"[{entity_type}_{namespace}_{sequence}]"
             self._next_sequence_by_entity_type[entity_type] = sequence
             self._owners_by_token[token] = session_id
         return token
@@ -64,6 +62,8 @@ class TokenVault:
         registry: TokenRegistry | None = None,
     ) -> None:
         self._session_id = session_id or uuid4().hex
+        # Independent of caller-supplied ownership IDs and process lifetime.
+        self._namespace = uuid4().hex
         self._registry = registry or TokenRegistry()
         self._entries_by_token: dict[str, VaultEntry] = {}
         self._tokens_by_value: dict[tuple[str, str], SensitiveToken] = {}
@@ -88,7 +88,9 @@ class TokenVault:
                 return existing_token
 
             token = SensitiveToken(
-                value=self._registry.issue(entity_type=entity_type, session_id=self._session_id),
+                value=self._registry.issue(
+                    entity_type=entity_type, session_id=self._session_id, namespace=self._namespace
+                ),
                 entity_type=entity_type,
             )
             self._entries_by_token[token.value] = VaultEntry(value=value, entity_type=entity_type)

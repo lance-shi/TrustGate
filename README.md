@@ -28,7 +28,8 @@ development acceptance are complete. The current implementation provides:
 framework-independent and has no persistent audit or vault storage.
 
 Day 7 adversarial testing, package validation, and final local acceptance are
-recorded in the [final acceptance report](docs/day7-acceptance.md). See the
+recorded in the [initial acceptance report](docs/day7-acceptance.md), superseded
+by the [security review follow-up](docs/security-review-fixes.md). See the
 [0.1.0 release notes](CHANGELOG.md) for behavior, compatibility, and limits.
 Verified environments are Windows AMD64 with Python 3.11.17 and 3.14.6;
 broader platform/version compatibility has not been established.
@@ -47,7 +48,7 @@ with gate.session() as session:
     # Send only safe_input to the LLM.
 
     # The LLM returns tokenized arguments it has seen, never raw values.
-    account_token = re.search(r"\[ACCOUNT_NUMBER_[1-9][0-9]*\]", safe_input)
+    account_token = re.search(r"\[ACCOUNT_NUMBER_[0-9a-f]{32}_[1-9][0-9]*\]", safe_input)
     if account_token is None:
         raise RuntimeError("The expected account token was not detected.")
     tool_call = ToolCall(
@@ -62,12 +63,21 @@ with gate.session() as session:
     # Send only safe_tool_result to the LLM.
 ```
 
-The LLM-visible result contains tokens such as `[ACCOUNT_NUMBER_1]` and
-`[PERSON_1]`, rather than the detected raw values. Token mappings are
-process-local, in-memory, scoped to one `TrustSession`, and discarded when that
-session closes. A token from another active session fails closed.
-Token sequence numbers are process-wide; use tokens from sanitized output
-rather than assuming that a new session starts at `_1`.
+Tokens use `[TYPE_<32 lowercase hex session namespace>_<sequence>]`, for
+example `[PERSON_d9b0fe66ead541dd87c471208b844e50_1]`. Each vault receives a
+random namespace so tokens are not reused after a process restart. Treat the
+whole value as opaque and copy it from sanitized output. Sequence numbers are
+process-wide; a new session need not start at `_1`. Legacy tokens such as
+`[PERSON_1]` are malformed and rejected.
+
+Mappings stay process-local, in-memory, scoped to one `TrustSession`, and are
+discarded on close. Foreign and pre-restart tokens fail closed. Same-type
+intersecting spans are merged. Cross-type overlap raises a fixed
+`DetectionUnavailableError` before returning any sanitized output, regardless
+of scores or policy; no entity type's release restriction is discarded.
+Presidio diagnostic records are suppressed during detector initialization and
+analysis, including DEBUG context logs. Other threads' logging and host logger
+configuration are preserved.
 
 `rehydrate_for_tool()` traverses nested JSON-like argument keys and values
 without mutating the `ToolCall`. Every token must belong to the current session

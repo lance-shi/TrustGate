@@ -1,5 +1,7 @@
 """Tests for the process-local, in-memory token vault."""
 
+import re
+
 import pytest
 
 from trustgate import UnknownTokenError
@@ -14,7 +16,7 @@ def test_store_creates_a_token_and_resolve_returns_its_internal_mapping() -> Non
     token = vault.store(value=RAW_ACCOUNT, entity_type="ACCOUNT_NUMBER")
     entry = vault.resolve(token.value)
 
-    assert token.value == "[ACCOUNT_NUMBER_1]"
+    assert re.fullmatch(r"\[ACCOUNT_NUMBER_[0-9a-f]{32}_1\]", token.value)
     assert token.entity_type == "ACCOUNT_NUMBER"
     assert entry.value == RAW_ACCOUNT
     assert entry.entity_type == "ACCOUNT_NUMBER"
@@ -35,8 +37,8 @@ def test_store_uses_a_new_token_for_a_different_value_of_the_same_type() -> None
     first = vault.store(value=RAW_ACCOUNT, entity_type="ACCOUNT_NUMBER")
     second = vault.store(value="RAW_ACCOUNT_DO_NOT_LEAK_87654321", entity_type="ACCOUNT_NUMBER")
 
-    assert first.value == "[ACCOUNT_NUMBER_1]"
-    assert second.value == "[ACCOUNT_NUMBER_2]"
+    assert re.fullmatch(r"\[ACCOUNT_NUMBER_[0-9a-f]{32}_1\]", first.value)
+    assert re.fullmatch(r"\[ACCOUNT_NUMBER_[0-9a-f]{32}_2\]", second.value)
     assert first != second
 
 
@@ -46,13 +48,13 @@ def test_store_uses_independent_sequences_for_entity_types() -> None:
     account = vault.store(value=RAW_ACCOUNT, entity_type="ACCOUNT_NUMBER")
     person = vault.store(value="Ada Lovelace", entity_type="PERSON")
 
-    assert account.value == "[ACCOUNT_NUMBER_1]"
-    assert person.value == "[PERSON_1]"
+    assert re.fullmatch(r"\[ACCOUNT_NUMBER_[0-9a-f]{32}_1\]", account.value)
+    assert re.fullmatch(r"\[PERSON_[0-9a-f]{32}_1\]", person.value)
 
 
 def test_unknown_token_fails_without_disclosing_the_requested_value() -> None:
     vault = TokenVault()
-    unknown_token = "[ACCOUNT_NUMBER_99]"
+    unknown_token = "[ACCOUNT_NUMBER_00000000000000000000000000000000_99]"
 
     with pytest.raises(UnknownTokenError) as error:
         vault.resolve(unknown_token)
