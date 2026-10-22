@@ -40,7 +40,21 @@ def _assert_safe(value):
     )
 
 
+def _assert_plain_json(value):
+    # LLM payloads must contain only data, never a session, vault or callable.
+    if type(value) is dict:
+        assert all(type(key) is str for key in value)
+        for item in value.values():
+            _assert_plain_json(item)
+    elif type(value) is list:
+        for item in value:
+            _assert_plain_json(item)
+    else:
+        assert value is None or type(value) in (str, bool, int, float)
+
+
 def _assert_report(report):
+    _assert_plain_json(report)
     for key in (
         "stable_person_token",
         "denied_release",
@@ -109,6 +123,7 @@ def test_real_demo_only_sends_sanitized_values_to_mock_llm_and_prints_safe_repor
     tool_destinations = []
 
     def checked_llm(safe_input, destination):
+        _assert_plain_json(safe_input)
         _assert_safe(safe_input)
         llm_inputs.append(safe_input)
         return llm(safe_input, destination)
@@ -119,6 +134,7 @@ def test_real_demo_only_sends_sanitized_values_to_mock_llm_and_prints_safe_repor
         return tool(destination, arguments)
 
     def checked_reply(safe_result):
+        _assert_plain_json(safe_result)
         _assert_safe(safe_result)
         llm_results.append(safe_result)
         return reply(safe_result)

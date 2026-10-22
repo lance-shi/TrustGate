@@ -4,6 +4,7 @@ from .audit import AuditSink, InMemoryAuditSink
 from .entity import EntityResolutionReason, EntityResolutionState
 from .exceptions import (
     AliasValidationError,
+    AuditRecordingError,
     CrossSessionTokenError,
     DataReleaseDenied,
     DetectionUnavailableError,
@@ -15,6 +16,7 @@ from .exceptions import (
     PolicyValidationError,
     SessionClosedError,
     TokenResolutionError,
+    ToolArgumentRehydrationError,
     ToolResultSanitizationError,
     TrustGateError,
     UnknownTokenError,
@@ -46,6 +48,7 @@ __all__ = [
     "AuditFailureReason",
     "AuditEventType",
     "AuditResolution",
+    "AuditRecordingError",
     "AuditSink",
     "CrossSessionTokenError",
     "DataPolicy",
@@ -69,6 +72,7 @@ __all__ = [
     "SensitiveToken",
     "SessionClosedError",
     "TokenResolutionError",
+    "ToolArgumentRehydrationError",
     "ToolResultSanitizationError",
     "ToolCall",
     "TranscriptEntry",

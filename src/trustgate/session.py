@@ -13,6 +13,8 @@ from .audit import AuditSink, InMemoryAuditSink, audit_identifier
 from .detection import PresidioDetector
 from .entity import EntityResolver
 from .exceptions import (
+    AuditRecordingError,
+    CrossSessionTokenError,
     DataReleaseDenied,
     DetectionUnavailableError,
     EntityResolutionError,
@@ -21,8 +23,10 @@ from .exceptions import (
     ModelValidationError,
     SessionClosedError,
     TokenResolutionError,
+    ToolArgumentRehydrationError,
     ToolResultSanitizationError,
     TrustGateError,
+    UnknownTokenError,
 )
 from .models import (
     AuditEvent,
@@ -64,6 +68,7 @@ class TrustSession:
 
     ``transcript=True`` opts into in-memory copies of completed sanitization
     outputs. Collection is disabled by default; safe snapshots survive close.
+    Audit failures raise AuditRecordingError; failed opening clears private state.
     """
 
     def __init__(
@@ -87,7 +92,15 @@ class TrustSession:
         self._policy = policy
         self._audit_sink = audit_sink if audit_sink is not None else InMemoryAuditSink()
         self._transcript = _SanitizedTranscript() if transcript else None
-        self._record_audit(AuditEventType.SESSION_OPENED)
+        try:
+            self._record_audit(AuditEventType.SESSION_OPENED)
+        except AuditRecordingError:
+            # A constructor failure must not leave live mappings or aliases
+            # even if a trusted caller retains the partially created instance.
+            self._vault.clear()
+            self._entity_resolver.clear()
+            self._closed = True
+            raise
 
     @property
     def transcript(self) -> tuple[TranscriptEntry, ...]:
@@ -130,7 +143,7 @@ class TrustSession:
         self.close()
 
     def close(self) -> None:
-        """Close the session and discard every private raw token mapping."""
+        """Discard private state before auditing; audit failure leaves it closed."""
         with self._lock:
             if self._closed:
                 return
@@ -140,7 +153,7 @@ class TrustSession:
             self._record_audit(AuditEventType.SESSION_CLOSED)
 
     def sanitize(self, text: str) -> str:
-        """Replace detected sensitive spans with stable session-local tokens."""
+        """Tokenize detected spans in a built-in str; reject custom scalar objects."""
         with self._lock:
             self._ensure_open()
             resolutions: list[AuditResolution] = []
@@ -157,29 +170,52 @@ class TrustSession:
 
         Token references are validated before any argument tree is returned, so
         one denied or invalid reference cannot produce a partially rehydrated
-        tool call. Values without token references are non-sensitive to this
-        boundary and are copied unchanged.
+        tool call. Dictionary keys and values use the same release checks;
+        rehydrated key collisions fail closed. Strings without token references
+        are copied unchanged. Cycles and unsupported structures fail safely;
+        shared containers are copied independently.
         """
         with self._lock:
             self._ensure_open()
             tokens: list[SensitiveToken] = []
+            failure: TrustGateError | None = None
             try:
-                arguments = {
-                    name: self._rehydrate_value(
-                        value=value,
-                        destination=tool_call.name,
-                        tokens=tokens,
-                    )
-                    for name, value in tool_call.arguments.items()
-                }
-            except (DataReleaseDenied, TokenResolutionError):
+                arguments = self._rehydrate_value(
+                    value=tool_call.arguments,
+                    destination=tool_call.name,
+                    tokens=tokens,
+                    active_containers=set(),
+                )
+                if not isinstance(arguments, dict):
+                    raise ToolArgumentRehydrationError
+            except (DataReleaseDenied, TokenResolutionError) as error:
+                # A caller-defined iterator could raise or alter these exceptions.
+                # Reconstruct only our exact known static types, never its payload.
+                safe_types = (
+                    DataReleaseDenied,
+                    TokenResolutionError,
+                    MalformedTokenError,
+                    UnknownTokenError,
+                    CrossSessionTokenError,
+                )
+                failure = (
+                    type(error)() if type(error) in safe_types else ToolArgumentRehydrationError()
+                )
+            except Exception:
+                failure = ToolArgumentRehydrationError()
+            if failure is not None:
                 self._record_audit(
                     AuditEventType.TOOL_RELEASE_DENIED,
                     destination=tool_call.name,
                     decision=DataReleaseDecision.DENY,
                     tokens=tuple(tokens),
+                    failure_reason=(
+                        AuditFailureReason.UNSAFE_ARGUMENT_STRUCTURE
+                        if isinstance(failure, ToolArgumentRehydrationError)
+                        else None
+                    ),
                 )
-                raise
+                raise failure
             if tokens:
                 self._record_audit(
                     AuditEventType.TOOL_RELEASE_ALLOWED,
@@ -257,6 +293,8 @@ class TrustSession:
     def _sanitize_text(
         self, text: str, *, resolutions: list[AuditResolution]
     ) -> tuple[str, tuple[SensitiveToken, ...]]:
+        if type(text) is not str:
+            raise ModelValidationError
         entities = self._detect(text)
         tokens: list[SensitiveToken] = []
         replacements: list[tuple[SensitiveEntity, SensitiveToken]] = []
@@ -318,11 +356,11 @@ class TrustSession:
         resolutions: list[AuditResolution],
         active_containers: set[int],
     ) -> JsonValue:
-        if isinstance(value, str):
+        if type(value) is str:
             sanitized, detected_tokens = self._sanitize_text(value, resolutions=resolutions)
             tokens.extend(detected_tokens)
             return sanitized
-        if value is None or isinstance(value, bool | int | float):
+        if value is None or type(value) in (bool, int, float):
             return value
         if not isinstance(value, list | dict):
             raise ToolResultSanitizationError
@@ -365,20 +403,61 @@ class TrustSession:
         value: JsonValue,
         destination: str,
         tokens: list[SensitiveToken],
+        active_containers: set[int],
     ) -> JsonValue:
-        if isinstance(value, str):
+        if type(value) is str:
             return self._rehydrate_text(text=value, destination=destination, tokens=tokens)
-        if isinstance(value, list):
-            return [
-                self._rehydrate_value(value=item, destination=destination, tokens=tokens)
-                for item in value
-            ]
-        if isinstance(value, dict):
-            return {
-                name: self._rehydrate_value(value=item, destination=destination, tokens=tokens)
-                for name, item in value.items()
-            }
-        return value
+        if value is None or type(value) in (bool, int, float):
+            return value
+        if not isinstance(value, list | dict):
+            raise ToolArgumentRehydrationError
+        container_id = id(value)
+        if container_id in active_containers:
+            raise ToolArgumentRehydrationError
+        active_containers.add(container_id)
+        try:
+            if isinstance(value, list):
+                return [
+                    self._rehydrate_value(
+                        value=item,
+                        destination=destination,
+                        tokens=tokens,
+                        active_containers=active_containers,
+                    )
+                    for item in value
+                ]
+            return self._rehydrate_mapping(
+                value=value,
+                destination=destination,
+                tokens=tokens,
+                active_containers=active_containers,
+            )
+        finally:
+            active_containers.remove(container_id)
+
+    def _rehydrate_mapping(
+        self,
+        *,
+        value: dict[str, JsonValue],
+        destination: str,
+        tokens: list[SensitiveToken],
+        active_containers: set[int],
+    ) -> dict[str, JsonValue]:
+        rehydrated: dict[str, JsonValue] = {}
+        for name, item in value.items():
+            if type(name) is not str:
+                raise ToolArgumentRehydrationError
+            key = self._rehydrate_text(text=name, destination=destination, tokens=tokens)
+            if key in rehydrated:
+                # Resolving distinct references must never overwrite an argument.
+                raise TokenResolutionError
+            rehydrated[key] = self._rehydrate_value(
+                value=item,
+                destination=destination,
+                tokens=tokens,
+                active_containers=active_containers,
+            )
+        return rehydrated
 
     def _rehydrate_text(
         self,
@@ -422,20 +501,36 @@ class TrustSession:
         failure_reason: AuditFailureReason | None = None,
         resolutions: tuple[AuditResolution, ...] = (),
     ) -> None:
-        unique_tokens = tuple(dict.fromkeys(audit_identifier(token.value) for token in tokens))
-        entity_types = tuple(dict.fromkeys(audit_identifier(token.entity_type) for token in tokens))
-        self._audit_sink.record(
-            AuditEvent(
-                event_type=event_type,
-                session_id=self._session_id,
-                entity_types=entity_types,
-                destination=audit_identifier(destination) if destination is not None else None,
-                decision=decision,
-                tokens=unique_tokens,
-                failure_reason=failure_reason,
-                resolutions=resolutions,
+        try:
+            unique_tokens = tuple(dict.fromkeys(audit_identifier(token.value) for token in tokens))
+            entity_types = tuple(
+                dict.fromkeys(audit_identifier(token.entity_type) for token in tokens)
             )
-        )
+            self._audit_sink.record(
+                AuditEvent(
+                    event_type=event_type,
+                    session_id=self._session_id,
+                    entity_types=entity_types,
+                    destination=audit_identifier(destination) if destination is not None else None,
+                    decision=decision,
+                    tokens=unique_tokens,
+                    failure_reason=failure_reason,
+                    resolutions=resolutions,
+                )
+            )
+        except Exception:
+            pass
+        else:
+            return
+        # Raising outside the handler drops the sink's error. During __exit__,
+        # Python can still attach the caller's active (possibly raw) body error.
+        # Clear that context on the new static exception, then use a bare re-raise
+        # so Python does not attach it again.
+        try:
+            raise AuditRecordingError
+        except AuditRecordingError as failure:
+            failure.__context__ = None
+            raise
 
 
 def _merge_overlapping_entities(

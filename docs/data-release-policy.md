@@ -28,8 +28,10 @@ data_policies:
 | `destinations` | A mapping from exact destination names to `allow` or `deny` |
 | Destination name | A nonempty string of at most 256 characters |
 
-Unknown fields, unsupported versions/decisions, duplicate YAML keys, and YAML
-merge keys are rejected. Missing, unreadable, malformed, or invalid documents
+The version must be the integer `1`; booleans and floating-point values are
+rejected even when they compare equal to `1`. Unknown fields, unsupported
+versions/decisions, duplicate YAML keys, and YAML merge keys are rejected.
+Missing, unreadable, malformed, excessively nested, or invalid documents
 raise a fixed `PolicyValidationError`; the document and its path are not included
 in the public exception. Loading failure does not produce a permissive gate.
 
@@ -57,11 +59,22 @@ tokens in that same call, and does not authorize sending a message.
 ## Tool-bound behavior
 
 Use `session.rehydrate_for_tool(ToolCall(...))` for arguments proposed by the
-LLM. It copies nested JSON-like argument values and resolves token references
-only within that session. Each referenced token requires an explicit `allow`
+LLM. It copies nested JSON-like argument keys and values and resolves token
+references only within that session. Each referenced token requires an explicit `allow`
 for its entity type and the call's destination before a raw value is substituted.
 Denied, malformed, unknown, cross-session, and closed-session references fail
-closed. A failed call never returns a partially rehydrated argument tree.
+closed. Top-level and nested dictionary keys use the same token parser and
+release policy as values. Literal square brackets are subject to token syntax
+validation in both positions. If distinct keys become equal after rehydration,
+the call raises a fixed `TokenResolutionError` rather than overwriting an
+argument. A failed call never returns a partially rehydrated argument tree.
+
+The argument tree is checked again during rehydration because nested model
+containers can be mutated after validation. Cycles, excessive recursion,
+unsupported objects, non-string keys, custom scalar subclasses, and unexpected
+iterator failures raise a fixed `ToolArgumentRehydrationError` and record a
+denied-release event with `unsafe_argument_structure`. Ordinary shared containers
+remain supported. This does not detect new sensitive data in untokenized strings.
 
 Strings containing several tokens require allowance for every token. Tokens
 always release their immutable canonical value; an ambiguous person token can
@@ -92,6 +105,12 @@ Audit events contain safe metadata and opaque identifiers, never rehydrated
 arguments or policy contents. The optional transcript is disabled by default and
 records only completed sanitization outputs; it never records the raw arguments
 returned by rehydration. Its content inherits the detector's coverage limits.
+
+If recording an event fails, a fixed `AuditRecordingError` replaces the original
+sink/serialization exception. No operation result or transcript entry is returned
+for that failed operation. An already accepted safe event is not rolled back.
+Close clears private state before attempting its audit event; other failures
+still require explicit session cleanup.
 
 See the [README](../README.md), [scope](v0.1-scope.md), and
 [runnable mock example](../examples/boundary_demo.py) for the complete lifecycle.

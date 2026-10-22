@@ -7,7 +7,14 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Annotated, Any, ClassVar, Literal, Mapping, Self
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_serializer
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_serializer,
+    field_validator,
+)
 from typing_extensions import TypeAliasType
 
 from .entity import (
@@ -18,8 +25,7 @@ from .entity import (
 from .exceptions import ModelValidationError, PolicyValidationError
 
 JsonValue = TypeAliasType(
-    "JsonValue",
-    str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
+    "JsonValue", str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
 )
 
 EntityType = Annotated[str, Field(pattern=r"^[A-Z][A-Z0-9_]*$", min_length=1)]
@@ -92,10 +98,16 @@ class SafePublicModel(BaseModel):
     ) -> Self:
         """Validate updates instead of accepting Pydantic's trusted copy path."""
         del deep
-        values = self.model_dump()
-        if update is not None:
-            values.update(update)
-        return type(self).model_validate(values)
+        try:
+            # Read fields directly: serializing a mutated model can emit warnings
+            # containing raw object reprs before validation has a chance to fail.
+            values = {name: getattr(self, name) for name in type(self).model_fields}
+            if update is not None:
+                values.update(update)
+            return type(self).model_validate(values)
+        except Exception:
+            pass
+        raise self.validation_error_type
 
 
 class DataReleaseDecision(StrEnum):
@@ -139,6 +151,14 @@ class TrustPolicy(SafePolicyModel):
     version: Literal[1]
     data_policies: Mapping[EntityType, DataPolicy]
 
+    @field_validator("version", mode="before")
+    @classmethod
+    def _require_integer_version(cls, value: object) -> object:
+        # Literal[1] otherwise also accepts True and 1.0 through equality.
+        if type(value) is not int:
+            raise ValueError("Policy version must be an integer.")
+        return value
+
     def model_post_init(self, __context: object) -> None:
         object.__setattr__(self, "data_policies", MappingProxyType(dict(self.data_policies)))
 
@@ -162,8 +182,9 @@ class AuditEventType(StrEnum):
 
 
 class AuditFailureReason(StrEnum):
-    """Safe categories for tool-result sanitization failures."""
+    """Safe categories for tool-boundary failures."""
 
+    UNSAFE_ARGUMENT_STRUCTURE = "unsafe_argument_structure"
     DETECTION_UNAVAILABLE = "detection_unavailable"
     ENTITY_RESOLUTION_UNAVAILABLE = "entity_resolution_unavailable"
     UNSAFE_RESULT_STRUCTURE = "unsafe_result_structure"

@@ -58,6 +58,18 @@ class DataReleaseDenied(TrustGateError):
     default_message = "Sensitive data release is denied."
 
 
+class AuditRecordingError(TrustGateError):
+    """Raised when safe audit metadata cannot be created or recorded."""
+
+    default_message = "The audit event could not be recorded safely."
+
+
+class ToolArgumentRehydrationError(TrustGateError):
+    """Raised when a tool argument structure cannot be safely rehydrated."""
+
+    default_message = "The tool arguments cannot be safely rehydrated."
+
+
 class ToolResultSanitizationError(TrustGateError):
     """Raised when a tool result cannot be safely made LLM-visible."""
 

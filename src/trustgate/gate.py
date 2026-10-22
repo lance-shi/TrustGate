@@ -14,7 +14,7 @@ from .session import TrustSession
 
 
 class _StrictPolicyLoader(yaml.SafeLoader):
-    """Safe YAML loader that rejects ambiguity in authorization policy."""
+    """Safe YAML loader that rejects ambiguity in data-release policy."""
 
 
 def _construct_strict_mapping(
@@ -75,7 +75,14 @@ class TrustGate:
             document = Path(path).read_text(encoding="utf-8")
             parsed = yaml.load(document, Loader=_StrictPolicyLoader)
             policy = TrustPolicy.model_validate(parsed)
-        except (OSError, TypeError, UnicodeError, yaml.YAMLError, PolicyValidationError):
+        except (
+            OSError,
+            TypeError,
+            UnicodeError,
+            RecursionError,
+            yaml.YAMLError,
+            PolicyValidationError,
+        ):
             policy = None
         if policy is None:
             raise PolicyValidationError

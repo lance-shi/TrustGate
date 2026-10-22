@@ -1,6 +1,7 @@
 """Validation tests for LLM-safe public models."""
 
 import pytest
+from security_assertions import assert_no_raw_sensitive_values
 
 from trustgate import (
     AuditEvent,
@@ -114,3 +115,15 @@ def test_pydantic_trusted_construction_paths_still_validate_sensitive_tokens(
 
     assert raw_value not in str(error.value)
     assert raw_value not in repr(error.value)
+
+
+@pytest.mark.parametrize("path", ["malformed_json", "non_mapping_strings"])
+def test_invalid_validation_documents_drop_parser_errors_and_raw_content(path) -> None:
+    raw_value = "VALIDATION_DOCUMENT_SECRET_12345678"
+    with pytest.raises(ModelValidationError) as error:
+        if path == "malformed_json":
+            SensitiveToken.model_validate_json('{"value": "' + raw_value)
+        else:
+            SensitiveToken.model_validate_strings([raw_value])
+    assert error.value.__cause__ is error.value.__context__ is None
+    assert_no_raw_sensitive_values(error.value, raw_value)

@@ -8,7 +8,8 @@ data exposure, not action authorization.
 
 ## Status
 
-TrustGate is pre-alpha. The current implementation provides:
+TrustGate 0.1.0 is pre-alpha. The documented v0.1 implementation and local
+development acceptance are complete. The current implementation provides:
 
 - Local English sensitive-text detection and deterministic, session-scoped
   tokenization.
@@ -26,9 +27,11 @@ TrustGate is pre-alpha. The current implementation provides:
 `rehydrate_for_user()` is intentionally not implemented. TrustGate also remains
 framework-independent and has no persistent audit or vault storage.
 
-Day 6 implementation and acceptance are recorded in the
-[acceptance report](docs/day6-acceptance.md). Independent adversarial review and
-release validation remain Day 7 work; the package is still pre-alpha.
+Day 7 adversarial testing, package validation, and final local acceptance are
+recorded in the [final acceptance report](docs/day7-acceptance.md). See the
+[0.1.0 release notes](CHANGELOG.md) for behavior, compatibility, and limits.
+Verified environments are Windows AMD64 with Python 3.11.17 and 3.14.6;
+broader platform/version compatibility has not been established.
 
 ## Usage: LLM and tool boundaries
 
@@ -66,11 +69,16 @@ session closes. A token from another active session fails closed.
 Token sequence numbers are process-wide; use tokens from sanitized output
 rather than assuming that a new session starts at `_1`.
 
-`rehydrate_for_tool()` traverses nested JSON-like arguments without mutating the
-`ToolCall`. Every token must belong to the current session and have an explicit
-`allow` decision for the tool destination. Unknown, malformed, cross-session,
-or denied tokens fail closed. Read and write-style destinations use the same
-data-release decision path.
+`rehydrate_for_tool()` traverses nested JSON-like argument keys and values
+without mutating the `ToolCall`. Every token must belong to the current session
+and have an explicit `allow` decision for the tool destination. Unknown,
+malformed, cross-session, or denied tokens fail closed. Read and write-style
+destinations use the same data-release decision path. Key collisions after rehydration fail with a safe
+`TokenResolutionError`; no partially rehydrated argument tree is returned.
+Malformed or cyclic argument structures, unsupported objects, and unexpected
+container iteration errors raise a fixed `ToolArgumentRehydrationError` and
+record `unsafe_argument_structure` on the denied-release event. Shared containers
+in independent branches remain supported and are copied independently.
 
 ## Person-name resolution
 
@@ -151,7 +159,8 @@ support.
 
 Policies are loaded using `TrustGate.from_yaml()`. The schema is strict: the
 only supported version is `1`, LLM exposure must be `tokenize`, and release
-decisions are `allow` or `deny`.
+decisions are `allow` or `deny`. The version must be an integer; `true` and
+`1.0` are rejected.
 
 ```yaml
 version: 1
@@ -177,11 +186,28 @@ including nested dictionaries, lists, and dictionary keys. Unsupported values
 and sanitized-key collisions fail closed rather than returning a potentially
 unsafe value.
 
+JSON scalar values must use ordinary built-in scalar types, and dictionary
+keys must be built-in `str` values.
+Custom subclasses of `str`, `int`, or `float` are rejected at these boundaries
+so attached objects or custom representations cannot escape into safe returns.
+`sanitize()` itself requires an ordinary built-in `str`; invalid input raises
+`ModelValidationError`. These checks do not add detection for numeric values.
+
 Each `TrustGate` uses an in-memory `InMemoryAuditSink` by default; an
 application can provide an `AuditSink` to `TrustGate(...)`. Events record only
 safe metadata: session ID, event type, release decision, and opaque audit
 identifiers for entity types, tokens, and destination. They never include vault
 mappings or raw sensitive values.
+
+Audit metadata construction, encoding, and sink exceptions raise a fixed
+`AuditRecordingError` without their original messages or exception chains.
+An audit failure returns no operation result and appends no transcript entry.
+If opening a session fails, its private state is cleared; closing always clears
+private state before recording the close event, even if that recording fails.
+Other failed operations retain private state until explicit close/context exit.
+An event already accepted by a custom sink is not rolled back, and recording
+is not automatically retried. The host remains responsible for its custom
+callback's own logging and side effects.
 
 Sanitization events also include a `resolutions` tuple with one entry per
 detected person occurrence, in processing order. Each entry contains only an
@@ -216,6 +242,12 @@ earlier state. Use a context manager, or close the session in `finally`, to
 discard vault mappings, entity/mention state, aliases, and token ownership
 metadata even when an operation fails. Audit and transcript snapshots remain
 readable after closure.
+
+Public model `model_copy()` validates fields and updates directly, without first
+serializing caller-owned contents. Invalid copies raise the model's fixed
+validation exception; damaged contents do not enter serializer warning messages
+through this copying path. Constructing or serializing arbitrary public models
+does not sanitize their contents.
 
 ## Optional sanitized transcript
 
@@ -344,3 +376,12 @@ The Day 6 acceptance commands and environment notes are recorded in the
 [acceptance report](docs/day6-acceptance.md). The
 [baseline and coverage checklist](docs/day6-baseline.md) preserves the
 pre-change baseline and the evidence for each implementation step.
+
+The [Day 7 package-validation report](docs/day7-step5.md) records branch coverage
+and clean wheel/source installs on Windows with Python 3.11 and 3.14. Wheels
+include `py.typed` for tools that consume the package's inline annotations.
+`scripts/release_smoke.py` verifies an installed distribution from outside the
+checkout using `python -I`, an isolated virtual environment, and an explicitly
+supplied local model directory. It blocks runtime socket connections and prints
+only a safe validation report. The [final acceptance report](docs/day7-acceptance.md)
+records all six Day 7 steps and the scope of the completed local verification.

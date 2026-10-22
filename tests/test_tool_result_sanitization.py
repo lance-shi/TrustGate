@@ -132,3 +132,24 @@ def test_tool_result_detection_failure_is_audited_without_raw_text() -> None:
     assert event.event_type is AuditEventType.TOOL_RESULT_SANITIZATION_FAILED
     assert event.failure_reason is AuditFailureReason.DETECTION_UNAVAILABLE
     assert_no_raw_sensitive_values(event, raw_value)
+
+
+@pytest.mark.parametrize("invalid_key", [42, (RAW_ACCOUNT,)], ids=["integer", "tuple"])
+def test_non_string_result_key_fails_after_prior_sanitization_without_leak_or_mutation(
+    invalid_key, caplog
+) -> None:
+    sink = InMemoryAuditSink()
+    result = {"processed": RAW_PERSON, invalid_key: RAW_ACCOUNT}
+    original = result.copy()
+    with _session(sink) as session:
+        with pytest.raises(ToolResultSanitizationError) as error:
+            session.sanitize_tool_result(result)  # type: ignore[arg-type]
+        assert result == original
+        assert error.value.__cause__ is error.value.__context__ is None
+        assert sink.events[-1].failure_reason is AuditFailureReason.UNSAFE_RESULT_STRUCTURE
+        assert_no_raw_sensitive_values(
+            (error.value, [event.model_dump_json() for event in sink.events], caplog.text),
+            RAW_PERSON,
+            RAW_ACCOUNT,
+        )
+    assert session._vault._entries_by_token == {}
